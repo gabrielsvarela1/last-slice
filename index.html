@@ -1,0 +1,210 @@
+<!doctype html>
+<html lang="pt-PT">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Pizzaria Sitiada</title>
+  <meta name="description" content="Serve pizzas e trava zombies ao mesmo tempo. Joga sozinho ou contra amigos online.">
+  <meta name="theme-color" content="#1a1210">
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Lilita+One&family=Rubik:wght@400;500;600&display=swap">
+</head>
+<body>
+<div class="app">
+  <header class="hud">
+    <div class="brand">Pizzaria Sitiada<small>cozinha contra zombies</small></div>
+    <div class="stats">
+      <div class="stat coins"><span>Moedas</span><b id="coins">100</b></div>
+      <div class="stat"><span>Pontos</span><b id="score">0</b></div>
+      <div class="stat hearts"><span>Reputação</span><b id="hearts">♥♥♥</b></div>
+      <div class="stat"><span>Onda</span><b id="wave">0</b></div>
+      <div class="stat" id="timeStat"><span id="timeLbl">Morte súbita em</span><b id="timeLeft">0:15</b></div>
+      <div class="stat" id="bestStat"><span>Recorde</span><b id="best">0</b></div>
+    </div>
+    <div class="hud-btns">
+      <button class="btn-sm" id="pauseBtn" type="button">Pausa <kbd>P</kbd></button>
+      <button class="btn-sm" id="soundBtn" type="button">Som: ligado</button>
+    </div>
+  </header>
+  <div class="rivals" id="rivals" hidden></div>
+  <div class="effects" id="effects" hidden></div>
+
+  <main class="stage" id="stage">
+    <section class="side">
+      <div class="side-head"><h2 id="shopTitle"><span class="dot" id="shopDot"></span><span id="shopName">Cozinha</span></h2><p>Pizzas entregues dão <b>moedas</b></p></div>
+      <canvas class="scene" id="kc" aria-label="Cozinha: clientes, bancada, forno e prateleira"></canvas>
+      <div class="tools" id="kTools"></div>
+    </section>
+    <section class="side tetris-side" id="tetrisSide" hidden>
+      <div class="side-head"><h2>Morte súbita</h2><p>Setas e espaço</p></div>
+      <canvas class="scene" id="tc" aria-label="Tetris da morte súbita"></canvas>
+      <div class="pad" id="tPad">
+        <button type="button" data-t="l" aria-label="Esquerda">◀</button>
+        <button type="button" data-t="rot" aria-label="Rodar">⟳</button>
+        <button type="button" data-t="r" aria-label="Direita">▶</button>
+        <button type="button" data-t="soft" aria-label="Descer">▼</button>
+        <button type="button" data-t="hard" aria-label="Largar">⤓</button>
+      </div>
+    </section>
+    <section class="side">
+      <div class="side-head"><h2>Esplanada</h2><p>As <b>moedas</b> compram defesas</p></div>
+      <canvas class="scene" id="dc" aria-label="Esplanada: filas de zombies e defesas"></canvas>
+      <div class="tools" id="dTools"></div>
+    </section>
+  </main>
+  <section class="side sabbar" id="sabBar" hidden>
+    <div class="side-head"><h2>Sabotagens</h2><p>Gastam <b>moedas</b> e atingem todos os rivais em jogo</p></div>
+    <div class="tools" id="sTools"></div>
+  </section>
+
+  <div class="overlay" id="overlay">
+    <div class="card wide" id="menuCard">
+      <div class="menu-grid">
+        <div class="menu-main">
+          <p class="eyebrow">Cozinha contra zombies</p>
+          <h1>Pizzaria Sitiada</h1>
+          <p class="lead">Serve pizzas de um lado e trava os zombies do outro. As pizzas dão moedas, as moedas pagam as defesas. Aos 5 minutos começa a morte súbita.</p>
+          <nav class="menu-list" aria-label="Menu principal">
+            <button class="mbtn primary" id="startBtn" type="button"><b>Jogar sozinho</b><span>Aguenta o máximo que conseguires</span></button>
+            <button class="mbtn" id="mpBtn" type="button"><b>Multijogador</b><span>Salas online, sabotagens e morte súbita</span></button>
+            <button class="mbtn" id="rankBtn" type="button"><b>Ranking</b><span>As melhores pontuações de todos os jogadores</span></button>
+            <button class="mbtn" id="customBtn" type="button"><b>Personalizar</b><span>Pizzaria, cores, defesas e utensílios</span></button>
+            <button class="mbtn" id="howBtn" type="button"><b>Como jogar</b><span>Regras, clientes, zombies e atalhos</span></button>
+            <button class="mbtn" id="optBtn" type="button"><b>Opções</b><span>Som e atalhos de teclado</span></button>
+          </nav>
+        </div>
+        <aside class="profile" aria-label="A tua pizzaria">
+          <canvas class="preview" id="menuPreview"></canvas>
+          <div class="pname"><span class="dot" id="menuDot"></span><span id="menuShop"></span></div>
+          <div class="pstats">
+            <div class="stat"><span>Estrelas</span><b class="stars" id="menuStars">0</b></div>
+            <div class="stat"><span>Recorde</span><b id="bestMenu">0</b></div>
+          </div>
+          <p class="note">Ganhas estrelas a jogar e trocas-las por cosméticos em Personalizar.</p>
+        </aside>
+      </div>
+    </div>
+
+    <div class="card wide" id="customCard" hidden>
+      <div class="card-head"><h1 class="h-sm">Personalizar</h1><span class="stars">★ <span id="customStars">0</span></span></div>
+      <div class="custom-grid">
+        <div class="custom-left">
+          <canvas class="preview" id="customPreview"></canvas>
+          <p class="note">Clica num item bloqueado para o experimentar. Clica outra vez para o comprar com estrelas. O progresso fica guardado no servidor.</p>
+        </div>
+        <div class="custom-right">
+          <div class="tabs" id="customTabs" role="tablist"></div>
+          <p class="note" id="customMsg" aria-live="polite"></p>
+          <div id="customBody" style="display:flex;flex-direction:column;gap:12px"></div>
+        </div>
+      </div>
+      <div class="row"><button class="play alt" id="customBack" type="button">Voltar ao menu</button></div>
+    </div>
+
+    <div class="card wide" id="howCard" hidden>
+      <h1 class="h-sm">Como jogar</h1>
+      <div class="how-sec"><h2>Objetivo</h2>
+        <p>Tens duas metades para gerir. Na cozinha fazes pizzas e ganhas moedas. Na esplanada gastas essas moedas em defesas contra os zombies. Perdes se a reputação chegar a zero (clientes que se vão embora zangados) ou se um zombie chegar à porta numa fila sem corta-pizzas.</p></div>
+      <div class="how-sec"><h2>Cozinha</h2>
+        <ul>
+          <li>Clica na bancada para pôr massa e junta os ingredientes do balão do cliente.</li>
+          <li>Mete a pizza no forno e tira-a quando a barra ficar verde. Se esperares demais, queima.</li>
+          <li>Uma pizza queimada não se deita fora: fica guardada (até 3) e podes atirá-la a uma fila da esplanada. Rola e acerta em todos os zombies da fila.</li>
+          <li>Clica no cliente para entregar. Quanto mais depressa, maior a gorjeta.</li>
+        </ul></div>
+      <div class="how-sec"><h2>Clientes</h2><div class="bestiary" id="custBest"></div></div>
+      <div class="how-sec"><h2>Zombies</h2><div class="bestiary" id="zombBest"></div></div>
+      <div class="how-sec"><h2>Morte súbita</h2>
+        <p>Aos 5 minutos aparece um Tetris no meio do ecrã. Os zombies ficam mais rápidos e em maior número, e os clientes com menos paciência. Se as peças chegarem ao topo, perdes. Cada linha completa dá moedas. Recebes 100 moedas de bónus quando a morte súbita começa.</p></div>
+      <div class="how-sec"><h2>Multijogador e sabotagens</h2>
+        <p>Cada jogador tem a sua pizzaria, com os mesmos clientes e as mesmas ondas. Ganha quem aguentar mais tempo. Uma entrega rápida manda um zombie roxo aos rivais, e com moedas podes comprar sabotagens:</p>
+        <ul id="sabList"></ul></div>
+      <div class="how-sec"><h2>Atalhos</h2>
+        <p>A mão esquerda fica no teclado e a direita no rato. A fila de cima (Q a Y) tem os ingredientes pela ordem em que se põem. A fila do meio segue o percurso da pizza: massa, forno, tirar, entregar. Os números são a esplanada. Podes mudar tudo em Opções.</p>
+        <div class="howkeys" id="howKeys"></div></div>
+      <div class="row"><button class="play alt" id="howBack" type="button">Voltar ao menu</button></div>
+    </div>
+
+    <div class="card" id="rankCard" hidden>
+      <h1 class="h-sm">Ranking</h1>
+      <div class="tabs" id="rankTabs" role="tablist">
+        <button class="tab" type="button" role="tab" data-mode="solo" aria-selected="true">Sozinho</button>
+        <button class="tab" type="button" role="tab" data-mode="mp" aria-selected="false">Multijogador</button>
+      </div>
+      <ol class="list" id="rankList"><li class="empty">A carregar…</li></ol>
+      <p class="note">A melhor pontuação de cada jogador. Muda o teu nome e o da pizzaria em Personalizar.</p>
+      <div class="row"><button class="play alt" id="rankBack" type="button">Voltar ao menu</button></div>
+    </div>
+
+    <div class="card wide" id="optionsCard" hidden>
+      <h1 class="h-sm">Opções</h1>
+      <div class="how-sec"><h2>Som</h2><div class="row"><button class="btn-sm" id="optSound" type="button">Som: ligado</button></div></div>
+      <div class="how-sec"><h2>Atalhos de teclado</h2>
+        <p class="note">Clica numa tecla e carrega na nova. Se a tecla já estiver a ser usada, as duas ações trocam. <kbd>Esc</kbd> cancela a mudança. Durante o jogo, <kbd>Esc</kbd> larga a seleção ou pausa.</p>
+        <div class="keys-grid" id="keysGrid"></div>
+        <p class="note" id="keysNote" aria-live="polite"></p>
+        <div class="row"><button class="btn-sm" id="keysReset" type="button">Repor teclas padrão</button></div>
+      </div>
+      <div class="row"><button class="play alt" id="optBack" type="button">Voltar</button></div>
+    </div>
+
+    <div class="card" id="mpCard" hidden>
+      <h1 class="h-sm">Multijogador</h1>
+      <p class="lead">Cada um na sua pizzaria, com os mesmos clientes e as mesmas ondas. Aos 5 minutos começa a morte súbita. Ganha quem aguentar mais tempo.</p>
+      <p class="warn" id="mpOff" hidden>Sem ligação ao servidor de jogo. Verifica a internet e recarrega a página.</p>
+      <div class="field"><label for="nick">O teu nome</label><input class="input" id="nick" maxlength="16" autocomplete="nickname" placeholder="Ex.: Gabriel"></div>
+      <div id="mpOut" style="display:flex;flex-direction:column;gap:14px">
+        <div class="row"><button class="play" id="createBtn" type="button">Criar sala</button></div>
+        <div class="field"><label for="codeIn">Entrar com código</label>
+          <form class="join" id="joinForm"><input class="input" id="codeIn" maxlength="4" autocomplete="off" placeholder="ABCD"><button class="btn-sm" type="submit">Entrar</button></form></div>
+        <div class="field"><p class="sub">Salas abertas</p><ul class="list" id="openRooms"><li class="empty">A procurar salas…</li></ul></div>
+      </div>
+      <div id="mpIn" hidden style="display:flex;flex-direction:column;gap:14px">
+        <div class="code-row"><span class="sub">Sala</span><span class="code" id="roomCode">ABCD</span><button class="btn-sm" id="copyCode" type="button">Copiar código</button></div>
+        <ul class="list" id="plist"></ul>
+        <p class="note" id="roomHint">A partida começa quando todos estiverem prontos.</p>
+        <div class="row"><button class="play" id="readyBtn" type="button">Estou pronto</button><button class="btn-sm" id="leaveBtn" type="button">Sair da sala</button></div>
+      </div>
+      <div class="row"><button class="btn-sm" id="mpBack" type="button">Voltar ao menu</button></div>
+    </div>
+
+    <div class="card" id="countCard" hidden>
+      <p class="sub" style="text-align:center">A partida começa em</p>
+      <div class="count" id="countNum">3</div>
+      <p class="note" style="text-align:center">Entregas rápidas mandam zombies aos rivais. Guarda moedas para as sabotagens.</p>
+    </div>
+
+    <div class="card" id="pauseCard" hidden>
+      <h1>Pausa</h1>
+      <p class="lead">O forno está desligado e os zombies estão parados.</p>
+      <div class="row"><button class="play" id="resumeBtn" type="button">Continuar</button><button class="btn-sm" id="pauseOpt" type="button">Opções</button><button class="btn-sm" id="quitBtn" type="button">Menu principal</button></div>
+    </div>
+
+    <div class="card" id="overCard" hidden>
+      <h1 id="overTitle">Fim de jogo</h1>
+      <p class="lead" id="overText"></p>
+      <div class="results">
+        <div><span>Pontos</span><b id="rScore">0</b></div>
+        <div><span>Pizzas</span><b id="rPizzas">0</b></div>
+        <div><span>Zombies</span><b id="rKills">0</b></div>
+        <div><span>Onda</span><b id="rWave">0</b></div>
+      </div>
+      <p class="earned" id="overStars"></p>
+      <div class="row"><button class="play" id="againBtn" type="button">Jogar outra vez</button><button class="btn-sm" id="overMenu" type="button">Menu principal</button><span class="best" id="overBest"></span></div>
+    </div>
+
+    <div class="card" id="mpOverCard" hidden>
+      <h1 id="mpTitle">Fim da partida</h1>
+      <p class="lead" id="mpText"></p>
+      <ol class="list" id="mpTable"></ol>
+      <p class="earned" id="mpStars"></p>
+      <div class="row"><button class="play" id="backRoomBtn" type="button">Voltar à sala</button><button class="btn-sm" id="exitMpBtn" type="button">Menu principal</button></div>
+    </div>
+  </div>
+</div>
+
+<script type="module" src="/src/main.js"></script>
+</body>
+</html>
