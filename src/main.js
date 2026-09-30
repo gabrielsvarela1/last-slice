@@ -147,6 +147,7 @@ if (!Array.isArray(P.owned)) P.owned = [];
 if (!P.sel || typeof P.sel !== 'object') P.sel = {};
 if (!P.keys || typeof P.keys !== 'object') P.keys = {};
 if (!P.keyNames || typeof P.keyNames !== 'object') P.keyNames = {};
+if (!P.story || typeof P.story !== 'object') P.story = {};
 P.name = cleanName(P.name || LS.get('pizzaria-sitiada-nick') || '');
 P.shop = cleanName(P.shop, 24);
 P.stars = Math.max(0, Math.floor(+P.stars || 0));
@@ -160,7 +161,7 @@ const saveP = () => {
   if (!sb) return;
   clearTimeout(saveTimer);
   saveTimer = setTimeout(() => {
-    saveProfile({ name: P.name, shop: P.shop, team: P.team, sel: P.sel, keys: P.keys, key_names: P.keyNames, muted: !!P.muted })
+    saveProfile({ name: P.name, shop: P.shop, team: P.team, sel: P.sel, keys: P.keys, key_names: P.keyNames, muted: !!P.muted, story: P.story })
       .catch(e => console.warn('Perfil não guardado no servidor', e));
   }, 800);
 };
@@ -518,23 +519,24 @@ const CTYPES = {
   critico: { w: 1, pay: 1.5, pat: .85, from: 2, tag: 'CRÍTICO', tagc: '#c9a2ff', name: 'Crítico', desc: 'Servido, devolve 1 de reputação. Zangado, tira 2.' },
   indeciso: { w: 1, pay: 1.2, pat: 1.1, from: 2, tag: 'INDECISO', tagc: '#b8f09a', name: 'Indeciso', desc: 'A meio da espera muda de pedido.' },
 };
-function randomOrder(rng, wave, simple) {
-  if (simple) return rng() < .3 ? ['molho', 'queijo', 'pepperoni'] : ['molho', 'queijo'];
-  const maxE = wave < 2 ? 1 : wave < 4 ? 2 : 3;
-  const n = Math.floor(rng() * (maxE + 1));
-  return ['molho', 'queijo', ...EXTRAS.map(t => [rng(), t]).sort((a, b) => a[0] - b[0]).slice(0, n).map(e => e[1])];
+// pool/maxE limitam os ingredientes extra (modo história); sem eles, o pedido cresce com as ondas.
+function randomOrder(rng, wave, simple, pool = EXTRAS, maxE) {
+  if (simple) return (pool.includes('pepperoni') && rng() < .3) ? ['molho', 'queijo', 'pepperoni'] : ['molho', 'queijo'];
+  const m = Math.min(maxE ?? (wave < 2 ? 1 : wave < 4 ? 2 : 3), pool.length);
+  const n = Math.floor(rng() * (m + 1));
+  return ['molho', 'queijo', ...pool.map(t => [rng(), t]).sort((a, b) => a[0] - b[0]).slice(0, n).map(e => e[1])];
 }
-function newCustomer(slot, wave, rng = Math.random, force) {
+function newCustomer(slot, wave, rng = Math.random, force, opts = {}) {
   let type = force;
   if (!type) {
-    const av = Object.entries(CTYPES).filter(([, d]) => wave >= d.from);
+    const av = opts.types ? Object.entries(CTYPES).filter(([id]) => opts.types.includes(id)) : Object.entries(CTYPES).filter(([, d]) => wave >= d.from);
     let r = rng() * av.reduce((s, [, d]) => s + d.w, 0);
     type = av[av.length - 1][0];
     for (const [id, d] of av) { r -= d.w; if (r <= 0) { type = id; break; } }
   }
   const ct = CTYPES[type];
-  const order = randomOrder(rng, wave, type === 'crianca');
-  const alt = type === 'indeciso' ? randomOrder(rng, wave + 1, false) : null;
+  const order = randomOrder(rng, wave, type === 'crianca', opts.extras, opts.maxE);
+  const alt = type === 'indeciso' ? randomOrder(rng, wave + 1, false, opts.extras, opts.maxE) : null;
   const n = order.length - 2;
   const max = (Math.max(24, 46 - wave * 2) + n * 3) * ct.pat;
   return {
@@ -723,12 +725,15 @@ const sfx = {
 /* ---------- estado ---------- */
 let G = 0;
 let S;
-// Morte súbita aos 5 min; com ?teste no endereço começa aos 15 s (para testar).
-const SD_AT = new URLSearchParams(location.search).has('teste') ? 15 : 300;
-function freshState(seed = (Math.random() * 2 ** 31) | 0, mp = false) {
+// Morte súbita aos 3 min; com ?teste no endereço começa aos 15 s (para testar).
+const SD_AT = new URLSearchParams(location.search).has('teste') ? 15 : 180;
+// Nas fases da história, a morte súbita só acontece se a fase a pedir (sdAt).
+const sdAtNow = () => S.story ? (S.story.sdAt ?? Infinity) : SD_AT;
+function freshState(seed = (Math.random() * 2 ** 31) | 0, mp = false, story = null) {
   return {
-    mode: 'play', mp, rc: mulberry(seed), rw: mulberry(seed ^ 0x2545F491), rt: mulberry(seed ^ 0x51ED27), time: 0,
-    coins: 100, score: 0, hearts: 3, wave: 0, nextWave: 15, queue: [],
+    mode: 'play', mp, story, rc: mulberry(seed), rw: mulberry(seed ^ 0x2545F491), rt: mulberry(seed ^ 0x51ED27), time: 0,
+    coins: story ? story.coins : 100, score: 0, hearts: 3, wave: 0,
+    nextWave: story ? (story.zombies.length ? story.firstWave : Infinity) : 15, queue: [],
     board: null, ovens: [null, null], rack: [null, null, null], custs: [], custTimer: 1,
     towers: [], zombies: [], shots: [], rollers: [], parts: [], floats: [], flyers: [],
     cutters: Array.from({ length: ROWS }, () => ({ st: 'ready', x: GX - 22 })),
@@ -788,6 +793,7 @@ function addDough() {
   S.board = newPizza(); burst('k', BOARD.x, BOARD.y, '#f7ecd6', 12, 120, 60, 4); sfx.pop();
 }
 function addTopping(t) {
+  if (S.story && !S.story.tops.includes(t)) { toast('Ainda não tens ' + TOPS[t].label.toLowerCase() + ' nesta fase', BOARD.x, 236, '#ffd2c4'); sfx.err(); return; }
   if (S.fx.ingred > 0 && S.fxTop === t) { toast('Acabou o stock: ' + TOPS[t].label.toLowerCase() + '!', BOARD.x, 236, '#ffb3a0'); sfx.err(); return; }
   if (!S.board) { toast('Primeiro a massa (D)', BOARD.x, 236, '#ffd2c4'); sfx.err(); return; }
   if (!addTop(S.board, t)) { toast('Já tem ' + TOPS[t].label.toLowerCase()); sfx.err(); return; }
@@ -862,6 +868,7 @@ function deliver(cu) {
 
 /* ---------- esplanada ---------- */
 function selectTool(t) {
+  if (TOWERS[t] && S.story && !S.story.towers.includes(t)) { float('d', DW / 2, 70, 'Ainda não desbloqueaste esta defesa', '#ffd2c4', 16); sfx.err(); return; }
   if ((t === 'pa' || t === 'queimada') && S.fx.itens > 0) { float('d', DW / 2, 70, 'Mãos atadas! Não podes usar itens.', '#ffb3a0', 16); sfx.err(); return; }
   if (t === 'queimada' && S.burnt <= 0 && S.tool !== 'queimada') { float('d', DW / 2, 70, 'Não tens pizzas queimadas. Deixa uma queimar no forno.', '#ffd2c4', 15); sfx.err(); return; }
   if (TOWERS[t] && S.fx.loja > 0) { float('d', DW / 2, 70, 'Loja fechada!', '#ffb3a0', 18); sfx.err(); return; }
@@ -918,8 +925,9 @@ function explode(t) {
   burst('d', t.x, t.y, '#ff7a2a', 30, 260, 120, 6); burst('d', t.x, t.y, '#ffd24a', 20, 200, 80, 4);
   S.shake = .35; sfx.boom();
 }
-function pickZType(w, R) {
-  const av = WTAB.filter(e => w >= e[1]);
+function pickZType(w, R, allowed) {
+  const av = allowed ? WTAB.filter(e => allowed.includes(e[0])) : WTAB.filter(e => w >= e[1]);
+  if (!av.length) return 'normal';
   const ws = av.map(e => e[2] * (e[0] === 'normal' ? 1 : 1 + w * .05));
   let r = R() * ws.reduce((a, b) => a + b, 0);
   for (let i = 0; i < av.length; i++) { r -= ws[i]; if (r <= 0) return av[i][0]; }
@@ -930,18 +938,22 @@ const WAVE_NEW = {
   4: 'Estafetas de mota: saltam a primeira defesa', 5: 'Chegou o Rei Zombie! E também gulosos e chefs', 6: 'Ladrões: roubam moedas enquanto andam',
 };
 function buildWave(w) {
-  const R = S.rw, n = Math.round((2 + w * 1.8) * (S.sd ? 1.4 + .4 * sdI() : 1));
+  const R = S.rw, n = Math.round((S.story ? 2 + w * 1.5 : 2 + w * 1.8) * (S.sd ? 1.4 + .4 * sdI() : 1));
   const span = Math.min(26, 12 + w * 2), mult = 1 + (w - 1) * .08;
   let lastRow = -1;
   for (let i = 0; i < n; i++) {
-    const type = pickZType(w, R);
+    const type = pickZType(w, R, S.story && S.story.zombies);
     let row; do { row = Math.floor(R() * ROWS); } while (row === lastRow && R() < .6);
     lastRow = row;
     S.queue.push({ at: S.time + i / n * span + R() * 1.2, type, row, mult, spdF: .92 + R() * .16 });
   }
-  if (w % 5 === 0) S.queue.push({ at: S.time + span * .5, type: 'gigante', row: Math.floor(R() * ROWS), mult, spdF: 1 });
+  const boss = S.story ? (S.story.boss && w === S.story.goal.n) : w % 5 === 0;
+  if (boss) S.queue.push({ at: S.time + span * .5, type: 'gigante', row: Math.floor(R() * ROWS), mult, spdF: 1 });
   S.queue.sort((a, b) => a.at - b.at);
-  S.banner = { txt: (S.sd ? 'Morte súbita · ' : '') + 'Onda ' + w, sub: WAVE_NEW[w] || (w % 5 === 0 ? 'O Rei Zombie voltou!' : `${n} zombies a caminho`), t: 0 };
+  const last = S.story && S.story.goal.type === 'waves' && w === S.story.goal.n;
+  const sub = S.story ? (boss ? 'O Rei Zombie chegou!' : last ? 'Última onda: aguenta!' : `${n} zombies a caminho`)
+    : WAVE_NEW[w] || (w % 5 === 0 ? 'O Rei Zombie voltou!' : `${n} zombies a caminho`);
+  S.banner = { txt: (S.sd ? 'Morte súbita · ' : '') + 'Onda ' + w + (S.story && S.story.goal.type === 'waves' ? ' de ' + S.story.goal.n : ''), sub, t: 0 };
   sfx.wave();
 }
 function startSD() {
@@ -1013,7 +1025,7 @@ function spawnSent(type, from) {
 /* ---------- ciclo ---------- */
 function update(dt) {
   S.time += dt; S.score += dt * 2 * scoreMul();
-  if (!S.sd && S.time >= SD_AT) startSD();
+  if (!S.sd && S.time >= sdAtNow()) startSD();
   if (S.sd) S.sdT += dt;
   for (const k in S.fx) S.fx[k] = Math.max(0, S.fx[k] - dt);
   S.sabCd = Math.max(0, S.sabCd - dt);
@@ -1021,7 +1033,7 @@ function update(dt) {
   S.custTimer -= dt;
   if (S.custTimer <= 0) {
     // o cliente é sempre gerado (mesma sequência para todos); só entra se houver lugar
-    const cu = newCustomer(0, S.wave, S.rc);
+    const cu = newCustomer(0, S.wave, S.rc, null, S.story ? { types: S.story.custs, extras: S.story.tops.filter(t => EXTRAS.includes(t)), maxE: S.story.maxE } : undefined);
     if (S.sd) { cu.max *= .85 - .1 * sdI(); cu.pat = cu.max; }
     const free = [0, 1, 2].filter(i => !S.custs.some(c => c.slot === i));
     if (free.length) { cu.slot = pick(free); S.custs.push(cu); }
@@ -1056,7 +1068,8 @@ function update(dt) {
     if (p.bake > COOK + 3 && Math.random() < dt * 10) S.parts.push({ w: 'k', x: 331 + rand(-30, 30), y: ovenY(i) + 10, vx: rand(-8, 8), vy: -40, g: -10, life: 1, max: 1, col: p.bake > BURN ? '#2a2a2a' : '#8a8a8a', size: rand(4, 7) });
   });
 
-  if (S.time >= S.nextWave) { S.wave++; buildWave(S.wave); S.nextWave = S.time + (S.sd ? 24 : 32); }
+  const wavesDone = S.story && S.story.goal.type === 'waves' && S.wave >= S.story.goal.n;
+  if (S.time >= S.nextWave && !wavesDone) { S.wave++; buildWave(S.wave); S.nextWave = S.time + (S.sd ? 24 : S.story ? S.story.gap : 32); }
   while (S.queue.length && S.queue[0].at <= S.time) {
     const q = S.queue.shift(), z = mkZombie(q.type, q.row, q.mult, q.spdF * sdSpeed());
     if (q.sent) z.sent = true;
@@ -1128,6 +1141,7 @@ function update(dt) {
   S.shots = S.shots.filter(s => !s.dead);
   S.rollers = S.rollers.filter(r => !r.dead);
   if (S.sd) { tetUpdate(dt); if (S.mode !== 'play') return; }
+  if (S.story && goalDone()) { levelComplete(); return; }
   stepFx(dt);
 }
 function stepFx(dt) {
@@ -1271,13 +1285,17 @@ function renderD() {
   c.fillStyle = '#4a2a18'; rr(c, 6, GY + 2 * CH + 8, 28, CH - 12, 6); c.fill();
   c.fillStyle = '#f4c343'; circ(c, 28, GY + 2 * CH + CH / 2 + 4, 2.5); c.fill();
 
-  const top = S.sd ? 24 : S.wave === 0 ? 15 : 32, left = Math.max(0, S.nextWave - S.time);
-  label(c, S.wave === 0 ? 'A PREPARAR' : 'ONDA ' + S.wave, 14, GY / 2, 18, S.sd ? '#ff8a70' : '#f4c343', null, 'left');
+  const noZ = S.story && !S.story.zombies.length;
+  const lastW = S.story && S.story.goal.type === 'waves' && S.wave >= S.story.goal.n;
+  const top = S.sd ? 24 : S.story ? (S.wave === 0 ? S.story.firstWave : S.story.gap) : S.wave === 0 ? 15 : 32;
+  const left = noZ || lastW ? 0 : Math.max(0, S.nextWave - S.time);
+  label(c, noZ ? 'SEM ZOMBIES' : S.wave === 0 ? 'A PREPARAR' : 'ONDA ' + S.wave, 14, GY / 2, 18, S.sd ? '#ff8a70' : '#f4c343', null, 'left');
   const bx = 150, bw = clamp(TET_COVER - bx - 190, 70, 280);
   c.fillStyle = 'rgba(255,255,255,.12)'; rr(c, bx, GY / 2 - 5, bw, 10, 5); c.fill();
   c.fillStyle = '#e24a2c'; rr(c, bx, GY / 2 - 5, Math.max(10, bw * (1 - left / top)), 10, 5); c.fill();
   c.font = '500 13px Rubik, system-ui, sans-serif'; c.fillStyle = '#e6d8c4'; c.textAlign = 'left'; c.textBaseline = 'middle';
-  c.fillText(S.wave === 0 ? `Primeira onda em ${Math.ceil(left)} s — faz pizzas!` : `Próxima onda em ${Math.ceil(left)} s`, bx + bw + 14, GY / 2);
+  c.fillText(noZ ? 'Hoje só há clientes' : lastW ? 'Última onda: derrota os que faltam!' : S.wave === 0 ? `Primeira onda em ${Math.ceil(left)} s — faz pizzas!` : `Próxima onda em ${Math.ceil(left)} s`, bx + bw + 14, GY / 2);
+  if (noZ) { label(c, 'Hoje não há zombies.', DW / 2, DH / 2 - 14, 24, '#fff8ec', 'rgba(0,0,0,.45)'); label(c, 'Concentra-te na cozinha!', DW / 2, DH / 2 + 16, 18, '#f4c343', 'rgba(0,0,0,.45)'); }
 
   if (dMouse && S.tool) {
     const col = Math.floor((dMouse.x - GX) / CW), r = Math.floor((dMouse.y - GY) / CH);
@@ -1611,6 +1629,12 @@ function syncTools() {
   qBtn.classList.toggle('cd', S.burnt <= 0 || S.fx.itens > 0);
   qBadge.textContent = String(S.burnt);
   for (const t of ORDER_TOPS) document.getElementById('t-' + t).classList.toggle('out', S.fx.ingred > 0 && S.fxTop === t);
+  // Na história só aparecem os botões do que já foi desbloqueado.
+  const st = S.story;
+  for (const t of ORDER_TOPS) setHidden('t-' + t, st && !st.tops.includes(t));
+  for (const t of Object.keys(TOWERS)) setHidden('d-' + t, st && !st.towers.includes(t));
+  setHidden('d-pa', st && !st.towers.length);
+  setHidden('d-queimada', st && !st.zombies.length);
   for (const s of SABS) {
     const b = document.getElementById('s-' + s.id);
     b.classList.toggle('poor', S.coins < s.cost);
@@ -1619,6 +1643,7 @@ function syncTools() {
   }
 }
 const hudCache = {};
+function setHidden(id, v) { const e = document.getElementById(id); if (e.hidden !== !!v) e.hidden = !!v; }
 function setText(id, v, html) { if (hudCache[id] !== v) { hudCache[id] = v; const e = document.getElementById(id); if (html) e.innerHTML = v; else e.textContent = v; } }
 function bump(sel) { const e = $(sel).parentElement; e.classList.remove('bump'); void e.offsetWidth; e.classList.add('bump'); }
 let lastSync = 0;
@@ -1629,11 +1654,14 @@ function hud() {
   setText('hearts', '♥'.repeat(h) + '<span class="lost">' + '♥'.repeat(3 - h) + '</span>', true);
   setText('wave', String(S.wave));
   setText('best', String(Math.max(P.best, S.mode === 'menu' ? 0 : Math.floor(S.score))));
-  setText('timeLbl', S.sd ? 'Morte súbita' : 'Morte súbita em');
-  setText('timeLeft', S.sd ? 'ATIVA' : S.mode === 'menu' ? fmtTime(SD_AT) : fmtTime(SD_AT - S.time));
+  if (S.story) { setText('timeLbl', 'Objetivo'); setText('timeLeft', goalText()); }
+  else {
+    setText('timeLbl', S.sd ? 'Morte súbita' : 'Morte súbita em');
+    setText('timeLeft', S.sd ? 'ATIVA' : S.mode === 'menu' ? fmtTime(SD_AT) : fmtTime(SD_AT - S.time));
+  }
   $('#timeStat').classList.toggle('sdon', S.sd);
   const now = performance.now();
-  if (now - lastSync > 250) { lastSync = now; syncTools(); renderEffects(); if (S.sd) layoutTetris(); }
+  if (now - lastSync > 250) { lastSync = now; syncTools(); renderEffects(); renderTip(); if (S.sd) layoutTetris(); }
 }
 function renderEffects() {
   const box = $('#effects'), items = [];
@@ -1659,7 +1687,7 @@ function syncShop() {
 
 /* ---------- ecrãs ---------- */
 const overlay = $('#overlay');
-const CARDS = ['menuCard', 'customCard', 'howCard', 'optionsCard', 'rankCard', 'pauseCard', 'overCard', 'mpCard', 'countCard', 'mpOverCard'];
+const CARDS = ['menuCard', 'storyCard', 'introCard', 'levelCard', 'customCard', 'howCard', 'optionsCard', 'rankCard', 'pauseCard', 'overCard', 'mpCard', 'countCard', 'mpOverCard'];
 let curCard = 'menuCard';
 function showCard(id, focus = true) {
   if (curCard === 'customCard' && id !== 'customCard') { PREVIEW = null; pendingBuy = null; refreshIcons(); }
@@ -1676,20 +1704,22 @@ function setMpHud(on) {
 function awardStars(win, done) {
   const earned = Math.min(80, Math.floor(S.score / 250) + (win ? 15 : 0) + (S.sd ? 5 : 0) + (S.mp ? 3 : 0));
   if (!sb) { P.stars += earned; saveP(); syncShop(); if (done) done(earned); return earned; }
-  submitGame({ score: S.score, wave: S.wave, duration: S.time, mode: S.mp ? 'mp' : 'solo', won: win, sd: S.sd })
+  submitGame({ score: S.score, wave: S.wave, duration: S.time, mode: S.mp ? 'mp' : S.story ? 'story' : 'solo', won: win, sd: S.sd })
     .then(r => { P.stars = r.stars; P.best = r.best; LS.set('pizzaria-sitiada-perfil', JSON.stringify(P)); syncShop(); if (done) done(r.earned); })
     .catch(e => { console.warn('Partida não guardada', e); if (done) done(null, e); });
   return null;
 }
 function toMenu() { if (NET.game) leaveRoom(); S = demoState(); setMpHud(false); hudCache.fx = null; renderEffects(); syncStage(); showCard('menuCard'); }
-function start() { audioOn(); S = freshState(); setMpHud(false); syncStage(); showCard(null); }
+// "Jogar outra vez" repete o último modo (sobrevivência ou a mesma fase).
+let replay = () => start();
+function start() { audioOn(); S = freshState(); replay = start; setMpHud(false); syncStage(); showCard(null); }
 function pause() { if (S.mode !== 'play' || S.mp) return; S.mode = 'pause'; showCard('pauseCard'); }
 function resume() { if (S.mode !== 'pause') return; S.mode = 'play'; showCard(null); audioOn(); }
 function gameOver(why) {
   if (S.mp) { finishMp('dead', why); return; }
   if (S.mode !== 'play') return;
   S.mode = 'over';
-  const sc = Math.floor(S.score), rec = sc > P.best;
+  const sc = Math.floor(S.score), rec = !S.story && sc > P.best;
   if (rec) P.best = sc;
   $('#overStars').textContent = sb ? 'A guardar estrelas…' : '';
   awardStars(false, (earned, err) => {
@@ -1702,12 +1732,14 @@ function gameOver(why) {
     tetris: 'As peças chegaram ao topo. Na morte súbita tens de dividir a atenção por três.',
   }[why];
   $('#rScore').textContent = sc; $('#rPizzas').textContent = S.served; $('#rKills').textContent = S.kills; $('#rWave').textContent = S.wave;
-  $('#overBest').innerHTML = rec ? '<b>Novo recorde!</b>' : 'Recorde: <b>' + P.best + '</b>';
+  $('#overBest').innerHTML = S.story ? '' : rec ? '<b>Novo recorde!</b>' : 'Recorde: <b>' + P.best + '</b>';
+  $('#againBtn').textContent = S.story ? 'Tentar outra vez' : 'Jogar outra vez';
+  $('#overMenu').textContent = S.story ? 'Mapa' : 'Menu principal';
   sfx.angry(); showCard('overCard');
 }
 $('#startBtn').addEventListener('click', start);
-$('#againBtn').addEventListener('click', start);
-$('#overMenu').addEventListener('click', toMenu);
+$('#againBtn').addEventListener('click', () => replay());
+$('#overMenu').addEventListener('click', () => { if (S.story) openStory(); else toMenu(); });
 $('#resumeBtn').addEventListener('click', resume);
 $('#quitBtn').addEventListener('click', toMenu);
 $('#pauseBtn').addEventListener('click', () => S.mode === 'pause' ? resume() : pause());
@@ -1771,6 +1803,196 @@ $('#howBtn').addEventListener('click', () => { buildHow(); showCard('howCard'); 
 $('#howBack').addEventListener('click', () => showCard('menuCard'));
 $('#customBtn').addEventListener('click', () => { renderCustom(); showCard('customCard', false); });
 $('#customBack').addEventListener('click', () => showCard('menuCard'));
+
+/* ---------- modo história ---------- */
+// Capítulo 1: cada fase introduz ingredientes, defesas, zombies ou clientes novos.
+// goal: serve (servir N pizzas), waves (aguentar N ondas) ou lines (N linhas no Tetris da morte súbita).
+// Fatias (1 a 3) = corações com que se acaba a fase.
+const ALL_TOPS = ['molho', 'queijo', 'pepperoni', 'cogumelo', 'azeitona', 'pimento'];
+const STORY = [
+  { id: 1, name: 'Primeira fornada', goal: { type: 'serve', n: 5 },
+    text: 'Abriste a tua pizzaria na Rua do Forno. Os primeiros clientes estão a chegar e só querem uma boa Margherita. Mostra-lhes do que és capaz!',
+    tops: ['molho', 'queijo'], maxE: 0, towers: [], zombies: [], custs: ['normal'], coins: 0, tips: true },
+  { id: 2, name: 'Visitas indesejadas', goal: { type: 'waves', n: 2 },
+    text: 'O cheiro a pizza acordou os zombies do bairro. Planta azeitoneiras na esplanada para proteger a porta, sem deixar de servir os clientes.',
+    tops: ['molho', 'queijo', 'pepperoni'], maxE: 1, towers: ['azeitoneira'], zombies: ['normal'], custs: ['normal'], coins: 100, firstWave: 30, gap: 30, tips: true },
+  { id: 3, name: 'Paredes de massa', goal: { type: 'waves', n: 3 },
+    text: 'Alguns zombies trazem caixas de pizza na cabeça e aguentam mais tiros. Um muro de massa à frente das azeitoneiras ganha-lhes tempo.',
+    tops: ['molho', 'queijo', 'pepperoni', 'cogumelo'], maxE: 1, towers: ['azeitoneira', 'muro'], zombies: ['normal', 'caixa'], custs: ['normal', 'crianca'], coins: 100, firstWave: 25, gap: 30 },
+  { id: 4, name: 'Clientes exigentes', goal: { type: 'serve', n: 12 },
+    text: 'A fama da pizzaria chegou longe. Hoje aparecem um crítico gastronómico e clientes VIP. Serve 12 pizzas sem deixar os zombies entrar.',
+    tops: ['molho', 'queijo', 'pepperoni', 'cogumelo', 'azeitona'], maxE: 2, towers: ['azeitoneira', 'muro'], zombies: ['normal', 'caixa'],
+    custs: ['normal', 'crianca', 'avo', 'vip', 'critico'], coins: 100, firstWave: 25, gap: 32 },
+  { id: 5, name: 'Estafetas da concorrência', goal: { type: 'waves', n: 4 },
+    text: 'A pizzaria rival mandou os seus estafetas zombies, que são muito rápidos. O queijo derretido da Queijeira abranda-os.',
+    tops: ALL_TOPS, maxE: 2, towers: ['azeitoneira', 'muro', 'queijeira'], zombies: ['normal', 'caixa', 'estafeta'],
+    custs: ['normal', 'crianca', 'avo', 'vip', 'critico', 'pressa'], coins: 125, firstWave: 25, gap: 32 },
+  { id: 6, name: 'O Rei Zombie', goal: { type: 'waves', n: 5 }, boss: true,
+    text: 'Corre o boato de que o Rei Zombie vem aí provar a pizza mais famosa da rua. Guarda o piri-piri para quando ele aparecer na última onda.',
+    tops: ALL_TOPS, maxE: 2, towers: ['azeitoneira', 'muro', 'queijeira', 'pimenta'], zombies: ['normal', 'caixa', 'estafeta', 'mota', 'gordo'],
+    custs: ['normal', 'crianca', 'avo', 'vip', 'critico', 'pressa', 'indeciso'], coins: 175, firstWave: 25, gap: 34 },
+  { id: 7, name: 'Ladrões de moedas', goal: { type: 'serve', n: 15 },
+    text: 'Há ladrões a roubar as moedas das pizzarias da rua. Derrota-os depressa para recuperares o que levaram, ou ficas sem dinheiro para defesas.',
+    tops: ALL_TOPS, maxE: 3, towers: ['azeitoneira', 'muro', 'queijeira', 'pimenta'], zombies: ['normal', 'caixa', 'estafeta', 'mota', 'gordo', 'ladrao'],
+    custs: ['normal', 'crianca', 'avo', 'vip', 'critico', 'pressa', 'indeciso'], coins: 175, firstWave: 20, gap: 30 },
+  { id: 8, name: 'Morte súbita', goal: { type: 'lines', n: 5 }, sdAt: 60,
+    text: 'Ao fim de um minuto começa a morte súbita e aparece um Tetris no meio da pizzaria. E dizem que anda por aí um chef zombie. Faz 5 linhas sem deixar a cozinha nem a esplanada caírem.',
+    tops: ALL_TOPS, maxE: 3, towers: ['azeitoneira', 'muro', 'queijeira', 'pimenta'], zombies: ['normal', 'caixa', 'estafeta', 'mota', 'gordo', 'ladrao', 'chef'],
+    custs: ['normal', 'crianca', 'avo', 'vip', 'critico', 'pressa', 'indeciso'], coins: 150, firstWave: 15, gap: 30 },
+];
+const TOWER_INFO = {
+  azeitoneira: 'Dispara azeitonas ao longo da fila.', muro: 'Não ataca, mas aguenta muitas dentadas.',
+  queijeira: 'Dispara queijo que abranda os zombies.', pimenta: 'Explode pouco depois de pousada e limpa tudo à volta.',
+};
+const levelSlices = id => P.story[id] || 0;
+const unlocked = id => id === 1 || levelSlices(id - 1) > 0;
+function goalLabel(lvl) {
+  const g = lvl.goal;
+  return g.type === 'serve' ? `Serve ${g.n} pizzas` : g.type === 'waves' ? `Aguenta ${g.n} ondas de zombies` : `Na morte súbita, faz ${g.n} linhas no Tetris`;
+}
+function goalText() {
+  const g = S.story.goal;
+  if (g.type === 'serve') return `${Math.min(S.served, g.n)}/${g.n} pizzas`;
+  if (g.type === 'waves') return `onda ${Math.min(S.wave, g.n)}/${g.n}`;
+  return S.sd ? `${Math.min(S.tet ? S.tet.lines : 0, g.n)}/${g.n} linhas` : 'Tetris em ' + fmtTime(sdAtNow() - S.time);
+}
+function goalDone() {
+  const g = S.story.goal;
+  if (g.type === 'serve') return S.served >= g.n;
+  if (g.type === 'waves') return S.wave >= g.n && !S.queue.length && !S.zombies.length;
+  return !!S.tet && S.tet.lines >= g.n;
+}
+function sliceRow(n, big) {
+  const d = el('span', 'slices' + (big ? ' big' : ''));
+  d.setAttribute('aria-label', `${n} de 3 fatias`);
+  for (let i = 0; i < 3; i++) d.appendChild(el('i', 'slice' + (i < n ? ' on' : '')));
+  return d;
+}
+
+function openStory() {
+  if (NET.game) leaveRoom();
+  S = demoState(); setMpHud(false); syncStage();
+  const grid = $('#levelGrid'); grid.textContent = '';
+  let total = 0, nextId = null;
+  for (const lvl of STORY) {
+    const got = levelSlices(lvl.id), open = unlocked(lvl.id);
+    total += got;
+    if (open && !got && nextId === null) nextId = lvl.id;
+    const li = el('li'), b = el('button', 'lvl' + (lvl.id === nextId ? ' next' : '')); b.type = 'button'; b.disabled = !open;
+    b.append(el('span', 'n', String(lvl.id)), el('b', null, lvl.name), el('span', 'g', open ? goalLabel(lvl) : `Termina a fase ${lvl.id - 1} para desbloquear`), sliceRow(got));
+    b.addEventListener('click', () => openIntro(lvl));
+    li.appendChild(b); grid.appendChild(li);
+  }
+  $('#storySlices').textContent = `${total}/${STORY.length * 3} fatias`;
+  showCard('storyCard', false);
+  const nb = grid.querySelector('.lvl.next') || grid.querySelector('.lvl:not(:disabled)');
+  if (nb) setTimeout(() => nb.focus({ preventScroll: true }), 30);
+}
+
+// Novidades de uma fase: tudo o que não existia na fase anterior, com o desenho de cada coisa.
+function levelNews(lvl) {
+  const prev = STORY.find(l => l.id === lvl.id - 1);
+  const was = (key, v) => prev && prev[key].includes(v);
+  const out = [];
+  for (const t of lvl.tops) if (!was('tops', t)) out.push({ kind: 'top', id: t, name: TOPS[t].label, desc: t === 'molho' || t === 'queijo' ? 'A base de todas as pizzas.' : 'Ingrediente novo nos pedidos.' });
+  for (const t of lvl.towers) if (!was('towers', t)) out.push({ kind: 'tower', id: t, name: TOWERS[t].label, desc: TOWER_INFO[t] });
+  for (const z of lvl.zombies) if (!was('zombies', z)) out.push({ kind: 'zombie', id: z, name: ZINFO[z][0], desc: ZINFO[z][1] });
+  if (lvl.boss) out.push({ kind: 'zombie', id: 'gigante', name: ZINFO.gigante[0], desc: 'Aparece na última onda. Aguenta muito.' });
+  for (const c of lvl.custs) if (!was('custs', c)) out.push({ kind: 'cust', id: c, name: c === 'normal' ? 'Cliente' : CTYPES[c].name, desc: c === 'normal' ? 'Pede uma pizza e espera com paciência.' : CTYPES[c].desc });
+  if (lvl.sdAt != null) out.push({ kind: 'sd', id: 'sd', name: 'Morte súbita', desc: 'Um Tetris no meio do ecrã. Joga com as setas e o espaço.' });
+  return out;
+}
+function drawNews(c, it) {
+  if (it.kind === 'top') {
+    c.save(); c.translate(0, 10); c.scale(2, 2);
+    if (it.id === 'molho') { c.fillStyle = '#d8402a'; circ(c, 20, 21, 13); c.fill(); c.fillStyle = 'rgba(255,255,255,.3)'; circ(c, 15, 16, 4); c.fill(); }
+    else if (it.id === 'queijo') { c.fillStyle = '#f5c542'; c.beginPath(); c.moveTo(6, 30); c.lineTo(34, 30); c.lineTo(34, 18); c.lineTo(6, 8); c.closePath(); c.fill(); c.fillStyle = '#dca52a'; circ(c, 14, 20, 3); c.fill(); circ(c, 25, 25, 2.5); c.fill(); }
+    else drawPiece(c, it.id, 20, 20, it.id === 'azeitona' ? 13 : 11, .3, false);
+    c.restore();
+  } else if (it.kind === 'tower') TOWER_DRAW[it.id](c, 40, 56, { anim: 0, hp: 1, max: 1, recoil: 0 });
+  else if (it.kind === 'zombie') {
+    const z = mkZombie(it.id, 0, 1); z.anim = 1; const f = 1 / Math.max(1, ZSTYLE[it.id].k * 1.05);
+    c.save(); c.translate(it.id === 'mota' ? 44 : 40, 96); c.scale(f, f); drawZombie(c, z, 0, 0); c.restore();
+  } else if (it.kind === 'cust') drawPerson(c, 40, -40, { type: it.id, seed: .3, changed: false, qT: 0, look: { skin: '#e8b890', shirt: '#3d7dd8', hair: '#6b3a1e' } }, 'ok');
+  else for (const [x, y, col] of [[14, 60, '#e24a2c'], [32, 60, '#e24a2c'], [50, 60, '#8a4fd6'], [32, 42, '#e24a2c'], [50, 78, '#f4c343'], [32, 78, '#6db552']]) drawBlock(c, x, y, 18, col);
+}
+let introLvl = null;
+function openIntro(lvl) {
+  if (!unlocked(lvl.id)) return;
+  introLvl = lvl;
+  $('#introNum').textContent = `Capítulo 1 · Fase ${lvl.id} de ${STORY.length}`;
+  $('#introName').textContent = lvl.name;
+  $('#introText').textContent = lvl.text;
+  $('#introGoal').textContent = goalLabel(lvl);
+  const got = levelSlices(lvl.id);
+  $('#introBest').textContent = got ? `O teu melhor: ${got} de 3 fatias` : 'Acaba com os 3 corações para ganhares as 3 fatias.';
+  const box = $('#introNew'); box.textContent = '';
+  const news = levelNews(lvl);
+  $('#introNewWrap').hidden = !news.length;
+  for (const it of news) {
+    const b = el('div', 'beast'), cv = document.createElement('canvas'), c = setup(cv, 80, 100);
+    drawNews(c, it);
+    const tx = el('div'); tx.append(el('b', null, it.name), el('span', null, it.desc));
+    b.append(cv, tx); box.appendChild(b);
+  }
+  showCard('introCard');
+}
+function startLevel(lvl) {
+  audioOn();
+  S = freshState(undefined, false, lvl); replay = () => startLevel(lvl);
+  setMpHud(false); $('#bestStat').hidden = true; syncStage(); showCard(null); syncTools();
+  S.banner = { txt: `Fase ${lvl.id}: ${lvl.name}`, sub: goalLabel(lvl), t: 0 };
+}
+function levelComplete() {
+  const lvl = S.story, got = clamp(S.hearts, 1, 3), prev = levelSlices(lvl.id);
+  S.mode = 'over';
+  if (got > prev) { P.story = { ...P.story, [lvl.id]: got }; saveP(); }
+  const next = STORY.find(l => l.id === lvl.id + 1);
+  $('#lvlNum').textContent = `Fase ${lvl.id} · ${lvl.name}`;
+  $('#lvlTitle').textContent = lvl.id === STORY.length ? 'Capítulo concluído!' : 'Fase concluída!';
+  const sl = $('#lvlSlices'); sl.textContent = ''; sl.appendChild(sliceRow(got, true));
+  $('#lvlText').textContent = got === 3 ? 'Perfeito: acabaste com os 3 corações.'
+    : `Acabaste com ${got} ${got === 1 ? 'coração' : 'corações'}. Repete a fase sem perder clientes para ganhares as 3 fatias.`;
+  $('#lvlStars').textContent = sb ? 'A guardar estrelas…' : '';
+  awardStars(prev === 0, (earned, err) => {
+    $('#lvlStars').textContent = err ? 'Sem ligação ao servidor: as estrelas desta fase não foram guardadas.' : `+${earned} ★ estrelas` + (prev === 0 ? ' (inclui 15 pela primeira vitória)' : '');
+  });
+  $('#lvlNext').hidden = !next;
+  sfx.ding(); setTimeout(() => sfx.coin(), 250);
+  showCard('levelCard');
+}
+
+// Dicas das primeiras fases: dizem sempre o próximo passo, com a tecla atual de cada ação.
+function storyTip() {
+  if (!S.story || !S.story.tips || S.mode !== 'play') return null;
+  const K = id => keyLabel(bindOf(id));
+  if (S.story.zombies.length) {
+    if (!S.towers.length && S.coins >= 50) return `Os zombies vêm pela direita. Escolhe a Azeitoneira (tecla ${K('azeitoneira')}) e clica numa casa da esplanada, nas primeiras colunas.`;
+    if (S.towers.length < 3 && S.coins >= 50 && S.wave > 0) return `Tens moedas para mais uma Azeitoneira (${K('azeitoneira')}). Protege as filas onde aparecem zombies.`;
+  }
+  const waiting = S.custs.filter(c => c.st === 'wait').sort((a, b) => a.pat / a.max - b.pat / b.max);
+  const cu = waiting[0];
+  if (cu && S.rack.some(p => p && keyOf(p.tops) === cu.key)) return `Pizza pronta na prateleira! Clica no cliente ou carrega em ${K('entregar')} para entregar.`;
+  if (S.ovens.some(p => p && pizzaState(p) === 'cooked')) return `A barra ficou verde: a pizza está pronta. Clica no forno ou carrega em ${K('tirar')} para a tirar antes que queime.`;
+  if (!cu) return S.served ? null : 'Espera pelo primeiro cliente…';
+  if (!S.board) return S.ovens.some(Boolean) ? `Enquanto a pizza coze, podes começar outra: ${K('massa')} para pôr massa.` : `Um cliente quer uma pizza. Clica na bancada ou carrega em ${K('massa')} para pôr massa.`;
+  const need = cu.order.filter(t => !S.board.tops.includes(t));
+  if (need.length) return `O balão do cliente mostra o pedido. Junta ${TOPS[need[0]].label.toLowerCase()} (tecla ${K(need[0])}).`;
+  return `Pizza montada! Clica na bancada ou carrega em ${K('forno')} para a meter no forno.`;
+}
+function renderTip() {
+  const t = storyTip(), box = $('#tip');
+  if (hudCache.tip === t) return; hudCache.tip = t;
+  box.hidden = !t; box.textContent = t || '';
+}
+
+$('#storyBtn').addEventListener('click', openStory);
+$('#storyBack').addEventListener('click', () => showCard('menuCard'));
+$('#introPlay').addEventListener('click', () => { if (introLvl) startLevel(introLvl); });
+$('#introBack').addEventListener('click', openStory);
+$('#lvlNext').addEventListener('click', () => { const n = STORY.find(l => l.id === S.story.id + 1); if (n) openIntro(n); });
+$('#lvlRetry').addEventListener('click', () => replay());
+$('#lvlMap').addEventListener('click', openStory);
 
 /* ---------- personalizar ---------- */
 let curTab = 'perfil', pendingBuy = null;
@@ -2180,6 +2402,10 @@ syncShop(); syncStage(); rebuildKeys();
     const row = await loadProfile();
     if (!row) return;
     P.stars = row.stars; P.owned = Array.isArray(row.owned) ? row.owned : []; P.best = row.best || 0;
+    // Progresso da história: fica o melhor entre o servidor e o browser (é só progresso, não dá moeda).
+    const st = row.story && typeof row.story === 'object' ? row.story : {};
+    for (const [k, v] of Object.entries(P.story)) if ((st[k] || 0) < v) st[k] = v;
+    P.story = st;
     const edited = row.name || row.shop || row.team !== 'tomate' || Object.keys(row.sel || {}).length || Object.keys(row.keys || {}).length;
     if (edited) {
       P.name = cleanName(row.name); P.shop = cleanName(row.shop, 24); P.team = TEAM.some(t => t.id === row.team) ? row.team : 'tomate';

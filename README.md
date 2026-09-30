@@ -1,7 +1,7 @@
 # Pizzaria Sitiada
 
 Serve pizzas de um lado e trava zombies do outro. As pizzas dão moedas, as moedas pagam as defesas.
-Aos 5 minutos começa a morte súbita, com um Tetris no meio. Joga-se sozinho ou online contra amigos.
+Aos 3 minutos começa a morte súbita, com um Tetris no meio. Tem modo história (capítulo 1 com 8 fases), sobrevivência e multijogador online.
 
 ## Tecnologia
 
@@ -16,7 +16,7 @@ Aos 5 minutos começa a morte súbita, com um Tetris no meio. Joga-se sozinho ou
 
 ```
 index.html                 ecrãs e menus
-src/main.js                o jogo (cozinha, esplanada, Tetris, menus, multijogador)
+src/main.js                o jogo (cozinha, esplanada, Tetris, menus, modo história, multijogador)
 src/style.css              estilos
 src/backend.js             sessão, perfil, estrelas, compras e ranking no Supabase
 src/net.js                 salas multijogador sobre o Supabase Realtime

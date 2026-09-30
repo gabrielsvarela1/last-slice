@@ -30,6 +30,7 @@
   </header>
   <div class="rivals" id="rivals" hidden></div>
   <div class="effects" id="effects" hidden></div>
+  <div class="tip" id="tip" role="status" hidden></div>
 
   <main class="stage" id="stage">
     <section class="side">
@@ -65,9 +66,10 @@
         <div class="menu-main">
           <p class="eyebrow">Cozinha contra zombies</p>
           <h1>Pizzaria Sitiada</h1>
-          <p class="lead">Serve pizzas de um lado e trava os zombies do outro. As pizzas dão moedas, as moedas pagam as defesas. Aos 5 minutos começa a morte súbita.</p>
+          <p class="lead">Serve pizzas de um lado e trava os zombies do outro. As pizzas dão moedas, as moedas pagam as defesas. Aos 3 minutos começa a morte súbita.</p>
           <nav class="menu-list" aria-label="Menu principal">
-            <button class="mbtn primary" id="startBtn" type="button"><b>Jogar sozinho</b><span>Aguenta o máximo que conseguires</span></button>
+            <button class="mbtn primary" id="storyBtn" type="button"><b>Modo história</b><span>Capítulo 1: a Rua do Forno, 8 fases</span></button>
+            <button class="mbtn" id="startBtn" type="button"><b>Sobrevivência</b><span>Sozinho, até não aguentares mais</span></button>
             <button class="mbtn" id="mpBtn" type="button"><b>Multijogador</b><span>Salas online, sabotagens e morte súbita</span></button>
             <button class="mbtn" id="rankBtn" type="button"><b>Ranking</b><span>As melhores pontuações de todos os jogadores</span></button>
             <button class="mbtn" id="customBtn" type="button"><b>Personalizar</b><span>Pizzaria, cores, defesas e utensílios</span></button>
@@ -85,6 +87,35 @@
           <p class="note">Ganhas estrelas a jogar e trocas-las por cosméticos em Personalizar.</p>
         </aside>
       </div>
+    </div>
+
+    <div class="card wide" id="storyCard" hidden>
+      <div class="card-head">
+        <div><p class="eyebrow">Modo história · Capítulo 1</p><h1 class="h-sm">A Rua do Forno</h1></div>
+        <span class="stars" id="storySlices">0/24 fatias</span>
+      </div>
+      <p class="lead">Abriste uma pizzaria numa rua sossegada. Sossegada até os zombies sentirem o cheiro a queijo derretido.</p>
+      <ol class="levels" id="levelGrid"></ol>
+      <p class="note">Cada fase dá até 3 fatias: uma por cada coração com que acabas. A primeira vitória em cada fase dá 15 estrelas extra.</p>
+      <div class="row"><button class="play alt" id="storyBack" type="button">Voltar ao menu</button></div>
+    </div>
+
+    <div class="card" id="introCard" hidden>
+      <p class="eyebrow" id="introNum">Fase 1</p>
+      <h1 class="h-sm" id="introName"></h1>
+      <p class="lead" id="introText"></p>
+      <div class="goal"><span class="sub">Objetivo</span><b id="introGoal"></b><span class="note" id="introBest"></span></div>
+      <div class="how-sec" id="introNewWrap"><h2>Novidades nesta fase</h2><div class="bestiary" id="introNew"></div></div>
+      <div class="row"><button class="play" id="introPlay" type="button">Começar</button><button class="btn-sm" id="introBack" type="button">Voltar ao mapa</button></div>
+    </div>
+
+    <div class="card" id="levelCard" hidden>
+      <p class="eyebrow" id="lvlNum"></p>
+      <h1 id="lvlTitle">Fase concluída!</h1>
+      <div id="lvlSlices"></div>
+      <p class="lead" id="lvlText"></p>
+      <p class="earned" id="lvlStars"></p>
+      <div class="row"><button class="play" id="lvlNext" type="button">Próxima fase</button><button class="btn-sm" id="lvlRetry" type="button">Repetir</button><button class="btn-sm" id="lvlMap" type="button">Mapa</button></div>
     </div>
 
     <div class="card wide" id="customCard" hidden>
@@ -117,7 +148,7 @@
       <div class="how-sec"><h2>Clientes</h2><div class="bestiary" id="custBest"></div></div>
       <div class="how-sec"><h2>Zombies</h2><div class="bestiary" id="zombBest"></div></div>
       <div class="how-sec"><h2>Morte súbita</h2>
-        <p>Aos 5 minutos aparece um Tetris no meio do ecrã. Os zombies ficam mais rápidos e em maior número, e os clientes com menos paciência. Se as peças chegarem ao topo, perdes. Cada linha completa dá moedas. Recebes 100 moedas de bónus quando a morte súbita começa.</p></div>
+        <p>Aos 3 minutos aparece um Tetris no meio do ecrã. Os zombies ficam mais rápidos e em maior número, e os clientes com menos paciência. Se as peças chegarem ao topo, perdes. Cada linha completa dá moedas. Recebes 100 moedas de bónus quando a morte súbita começa.</p></div>
       <div class="how-sec"><h2>Multijogador e sabotagens</h2>
         <p>Cada jogador tem a sua pizzaria, com os mesmos clientes e as mesmas ondas. Ganha quem aguentar mais tempo. Uma entrega rápida manda um zombie roxo aos rivais, e com moedas podes comprar sabotagens:</p>
         <ul id="sabList"></ul></div>
@@ -152,7 +183,7 @@
 
     <div class="card" id="mpCard" hidden>
       <h1 class="h-sm">Multijogador</h1>
-      <p class="lead">Cada um na sua pizzaria, com os mesmos clientes e as mesmas ondas. Aos 5 minutos começa a morte súbita. Ganha quem aguentar mais tempo.</p>
+      <p class="lead">Cada um na sua pizzaria, com os mesmos clientes e as mesmas ondas. Aos 3 minutos começa a morte súbita. Ganha quem aguentar mais tempo.</p>
       <p class="warn" id="mpOff" hidden>Sem ligação ao servidor de jogo. Verifica a internet e recarrega a página.</p>
       <div class="field"><label for="nick">O teu nome</label><input class="input" id="nick" maxlength="16" autocomplete="nickname" placeholder="Ex.: Gabriel"></div>
       <div id="mpOut" style="display:flex;flex-direction:column;gap:14px">
