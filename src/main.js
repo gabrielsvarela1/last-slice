@@ -7,7 +7,8 @@ import { createRoomApi } from './net.js';
 const $ = s => document.querySelector(s);
 const TAU = Math.PI * 2;
 const REDUCED = matchMedia('(prefers-reduced-motion: reduce)').matches;
-const DPR = Math.min(2, window.devicePixelRatio || 1);
+const DPR_MAX = Math.min(2, window.devicePixelRatio || 1);
+let DPR = DPR_MAX;
 const rand = (a, b) => a + Math.random() * (b - a);
 const pick = a => a[Math.floor(Math.random() * a.length)];
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
@@ -182,8 +183,34 @@ const KW = 560, KH = 460, DW = 720, DH = 460;
 const TW = 10, TH = 20, TS = 18, TTOP = 44, TCW = TW * TS, TCH = TTOP + TH * TS;
 const PVW = 520, PVH = 260;
 const kc = $('#kc'), dc = $('#dc'), tc = $('#tc');
-const kx = setup(kc, KW, KH), dx = setup(dc, DW, DH), tx = setup(tc, TCW, TCH);
-const mpx = setup($('#menuPreview'), PVW, PVH), cpx = setup($('#customPreview'), PVW, PVH);
+/* ---------- desempenho: modo leve ---------- */
+// Leve: resolução 1x, 30 imagens por segundo, menos partículas e sem efeitos caros.
+// "Automático" liga-o em telemóveis e tablets (ecrã tátil) e em aparelhos muito fracos.
+const COARSE = matchMedia('(pointer: coarse)').matches;
+const WEAK = (navigator.deviceMemory && navigator.deviceMemory <= 2) || (navigator.hardwareConcurrency && navigator.hardwareConcurrency <= 2);
+let LITE = false;
+const computeLite = () => { const g = P.gfx || 'auto'; return g === 'leve' || (g === 'auto' && (COARSE || WEAK || new URLSearchParams(location.search).has('leve'))); };
+let kx, dx, tx, mpx, cpx;
+function applyGfx() {
+  LITE = computeLite(); DPR = LITE ? 1 : DPR_MAX;
+  kx = setup(kc, KW, KH); dx = setup(dc, DW, DH); tx = setup(tc, TCW, TCH);
+  mpx = setup($('#menuPreview'), PVW, PVH); cpx = setup($('#customPreview'), PVW, PVH);
+  document.body.classList.toggle('lite', LITE);
+  LAYERS.sig = '';
+}
+
+// Camadas fixas: o que não mexe (paredes, chão, forno, relva) é desenhado uma vez e copiado a cada imagem.
+// Voltam a ser desenhadas quando muda a personalização, a cor da equipa ou o modo gráfico.
+const LAYERS = { k: null, d: null, sig: '' };
+function makeLayer(W, H, draw) { const cv = document.createElement('canvas'); draw(setup(cv, W, H)); return cv; }
+function ensureLayers() {
+  const sig = [P.team, JSON.stringify(P.sel), P.owned.length, PREVIEW ? PREVIEW.id : '', LITE, DPR].join('|');
+  if (sig === LAYERS.sig) return;
+  LAYERS.sig = sig;
+  LAYERS.k = makeLayer(KW, KH, drawKitchenStatic);
+  LAYERS.d = makeLayer(DW, DH, drawLawnStatic);
+}
+applyGfx();
 
 /* ---------- cenário ---------- */
 function drawWall(c, W, H, v) {
@@ -238,8 +265,11 @@ function drawAwning(c, x, y, w, h, col) {
   }
 }
 const DECO = (() => { const r = mulberry(7); return Array.from({ length: 60 }, () => [r(), r(), r()]); })();
-function drawLawnDeco(c, x0, y0, W, H, v) {
+function drawLawnDeco(c, x0, y0, W, H, v, only) {
   if (!v.deco) return;
+  const anim = v.deco === 'snow' || v.deco === 'fireflies';
+  if (only === 'static' && anim && !LITE) return;
+  if (only === 'anim' && !anim) return;
   for (const [a, b, s] of DECO) {
     let x = x0 + a * W, y = y0 + b * H;
     if (v.deco === 'leaves') { c.fillStyle = s < .5 ? '#d9772a' : '#b5462a'; ell(c, x, y, 5, 2.5, s * 6); c.fill(); }
@@ -725,8 +755,9 @@ const sfx = {
 /* ---------- estado ---------- */
 let G = 0;
 let S;
-// Morte súbita aos 3 min; com ?teste no endereço começa aos 15 s (para testar).
-const SD_AT = new URLSearchParams(location.search).has('teste') ? 15 : 180;
+// Morte súbita aos 3 min; com ?teste no endereço começa aos 15 s (ou ?teste=N para N segundos).
+const SD_TEST = new URLSearchParams(location.search).get('teste');
+const SD_AT = SD_TEST === null ? 180 : (Number(SD_TEST) > 0 ? Number(SD_TEST) : 15);
 // Nas fases da história, a morte súbita só acontece se a fase a pedir (sdAt).
 const sdAtNow = () => S.story ? (S.story.sdAt ?? Infinity) : SD_AT;
 function freshState(seed = (Math.random() * 2 ** 31) | 0, mp = false, story = null) {
@@ -773,7 +804,7 @@ const scoreMul = () => S.sd ? 1.5 : 1;
 
 /* ---------- efeitos ---------- */
 function burst(w, x, y, col, n = 8, sp = 90, g = 200, size = 3) {
-  if (REDUCED) n = Math.ceil(n / 3);
+  if (REDUCED || LITE) n = Math.ceil(n / 3);
   for (let i = 0; i < n; i++) {
     const a = rand(0, TAU), v = rand(.3, 1) * sp;
     S.parts.push({ w, x, y, vx: Math.cos(a) * v, vy: Math.sin(a) * v - sp * .3, g, life: rand(.35, .7), max: .7, col, size: rand(.6, 1.2) * size });
@@ -958,7 +989,7 @@ function buildWave(w) {
 }
 function startSD() {
   S.sd = true; S.sdT = 0; S.tet = newTetris(); S.coins += 100; S.nextWave = S.time + 3;
-  S.banner = { txt: 'MORTE SÚBITA', sub: 'Tudo mais rápido. Joga o Tetris com as setas! +100 moedas', t: 0 };
+  S.banner = { txt: 'MORTE SÚBITA', sub: MOBILE ? 'Tetris: toca para rodar, arrasta para mover, desliza para baixo para largar.' : 'Tudo mais rápido. Joga o Tetris com as setas! +100 moedas', t: 0 };
   float('k', KW / 2, 200, '+100 moedas de bónus', '#f4c343', 20); bump('#coins');
   sfx.sd(); syncStage();
 }
@@ -1065,7 +1096,7 @@ function update(dt) {
     const before = pizzaState(p); p.bake += dt; const after = pizzaState(p);
     if (before === 'raw' && after === 'cooked') sfx.ding();
     if (before === 'cooked' && after === 'burnt') sfx.err();
-    if (p.bake > COOK + 3 && Math.random() < dt * 10) S.parts.push({ w: 'k', x: 331 + rand(-30, 30), y: ovenY(i) + 10, vx: rand(-8, 8), vy: -40, g: -10, life: 1, max: 1, col: p.bake > BURN ? '#2a2a2a' : '#8a8a8a', size: rand(4, 7) });
+    if (!LITE && p.bake > COOK + 3 && Math.random() < dt * 10) S.parts.push({ w: 'k', x: 331 + rand(-30, 30), y: ovenY(i) + 10, vx: rand(-8, 8), vy: -40, g: -10, life: 1, max: 1, col: p.bake > BURN ? '#2a2a2a' : '#8a8a8a', size: rand(4, 7) });
   });
 
   const wavesDone = S.story && S.story.goal.type === 'waves' && S.wave >= S.story.goal.n;
@@ -1162,12 +1193,46 @@ function idle(dt) {
 
 /* ---------- desenho: cozinha ---------- */
 let kMouse = null, dMouse = null;
-function renderK() {
-  const c = kx;
+function drawKitchenStatic(c) {
   drawWall(c, KW, 150, SK('parede'));
   drawAwning(c, 0, 0, KW, 12, teamColor(P.team));
-  for (const cu of S.custs) drawCustomer(c, cu);
   drawCounter(c, 150, KW, 46, SK('balcao'));
+  drawFloor(c, 196, KW, KH, SK('chao'));
+  label(c, 'BANCADA', BOARD.x, 226, 14, '#f7ecdc', 'rgba(0,0,0,.5)');
+  const tb = SK('tabua');
+  c.fillStyle = 'rgba(0,0,0,.3)'; circ(c, BOARD.x + 3, BOARD.y + 6, BOARD.r); c.fill();
+  c.fillStyle = tb.wood; circ(c, BOARD.x, BOARD.y, BOARD.r); c.fill();
+  c.strokeStyle = tb.ring; c.lineWidth = 3; circ(c, BOARD.x, BOARD.y, BOARD.r - 4); c.stroke();
+  c.strokeStyle = 'rgba(0,0,0,.14)'; c.lineWidth = 1.5;
+  for (let i = 1; i < 4; i++) { c.beginPath(); c.arc(BOARD.x - 20, BOARD.y + 10, i * 22, -.6, 1.4); c.stroke(); }
+  const { x: x0, y: y0, w, h } = OVEN, v = SK('forno');
+  c.fillStyle = 'rgba(0,0,0,.3)'; rr(c, x0 + 3, y0 + 6, w, h, 26); c.fill();
+  c.fillStyle = v.body; rr(c, x0, y0, w, h, 26); c.fill();
+  c.save(); rr(c, x0, y0, w, h, 26); c.clip();
+  c.strokeStyle = 'rgba(0,0,0,.2)'; c.lineWidth = 1;
+  for (let y = y0 + 8, row = 0; y < y0 + h; y += 16, row++) {
+    c.beginPath(); c.moveTo(x0, y); c.lineTo(x0 + w, y); c.stroke();
+    for (let x = x0 + (row % 2 ? 12 : 30); x < x0 + w; x += 36) { c.beginPath(); c.moveTo(x, y); c.lineTo(x, y + 16); c.stroke(); }
+  }
+  c.restore();
+  for (let i = 0; i < 2; i++) {
+    const oy = ovenY(i), ox = x0 + 22, ow = w - 44;
+    c.fillStyle = '#1b0d08'; rr(c, ox, oy, ow, 70, 26); c.fill();
+    c.fillStyle = 'rgba(0,0,0,.45)'; rr(c, ox, oy + 76, ow, 8, 4); c.fill();
+  }
+  label(c, 'PRONTAS', RACK.x, 215, 14, '#f7ecdc', 'rgba(0,0,0,.5)');
+  const pv = SK('prato');
+  for (let i = 0; i < 3; i++) {
+    const y = RACK.y(i);
+    c.fillStyle = 'rgba(0,0,0,.3)'; circ(c, RACK.x + 2, y + 4, RACK.r); c.fill();
+    c.fillStyle = pv.a; circ(c, RACK.x, y, RACK.r); c.fill();
+    c.strokeStyle = pv.b; c.lineWidth = 2.5; circ(c, RACK.x, y, RACK.r - 5); c.stroke();
+  }
+}
+function renderK() {
+  const c = kx;
+  ensureLayers(); c.drawImage(LAYERS.k, 0, 0, KW, KH);
+  for (const cu of S.custs) drawCustomer(c, cu);
   for (const cu of S.custs) {
     if (cu.st === 'leave') continue;
     const sx = SLOTS[cu.slot], ratio = clamp(cu.pat / cu.max, 0, 1);
@@ -1176,15 +1241,6 @@ function renderK() {
     rr(c, sx - 60, 168, Math.max(10, 142 * ratio), 10, 5); c.fill();
     if (kMouse && kMouse.y < 196 && kMouse.x > sx - 62 && kMouse.x < sx + 86) { c.strokeStyle = 'rgba(255,255,255,.7)'; c.lineWidth = 2; rr(c, sx - 4, 6, 90, 80, 15); c.stroke(); }
   }
-  drawFloor(c, 196, KW, KH, SK('chao'));
-
-  label(c, 'BANCADA', BOARD.x, 226, 14, '#f7ecdc', 'rgba(0,0,0,.5)');
-  const tb = SK('tabua');
-  c.fillStyle = 'rgba(0,0,0,.3)'; circ(c, BOARD.x + 3, BOARD.y + 6, BOARD.r); c.fill();
-  c.fillStyle = tb.wood; circ(c, BOARD.x, BOARD.y, BOARD.r); c.fill();
-  c.strokeStyle = tb.ring; c.lineWidth = 3; circ(c, BOARD.x, BOARD.y, BOARD.r - 4); c.stroke();
-  c.strokeStyle = 'rgba(0,0,0,.14)'; c.lineWidth = 1.5;
-  for (let i = 1; i < 4; i++) { c.beginPath(); c.arc(BOARD.x - 20, BOARD.y + 10, i * 22, -.6, 1.4); c.stroke(); }
   if (S.board) drawPizza(c, BOARD.x, BOARD.y, 74, S.board);
   else {
     c.setLineDash([6, 6]); c.strokeStyle = 'rgba(255,240,220,.6)'; c.lineWidth = 2; circ(c, BOARD.x, BOARD.y, 62); c.stroke(); c.setLineDash([]);
@@ -1196,14 +1252,9 @@ function renderK() {
     if (S.board) label(c, 'Clica: para o forno', BOARD.x, BOARD.y + BOARD.r + 12, 12, '#fff', '#1a1210');
   }
   drawOven(c);
-  label(c, 'PRONTAS', RACK.x, 215, 14, '#f7ecdc', 'rgba(0,0,0,.5)');
   if (S.rack.some(Boolean)) label(c, 'entregar · ' + keyLabel(bindOf('entregar')), RACK.x - 8, 230, 11, '#f4c343', 'rgba(0,0,0,.6)');
-  const pv = SK('prato');
   for (let i = 0; i < 3; i++) {
     const y = RACK.y(i);
-    c.fillStyle = 'rgba(0,0,0,.3)'; circ(c, RACK.x + 2, y + 4, RACK.r); c.fill();
-    c.fillStyle = pv.a; circ(c, RACK.x, y, RACK.r); c.fill();
-    c.strokeStyle = pv.b; c.lineWidth = 2.5; circ(c, RACK.x, y, RACK.r - 5); c.stroke();
     if (S.rack[i]) {
       drawPizza(c, RACK.x, y, 26, S.rack[i]);
       if (kMouse && Math.hypot(kMouse.x - RACK.x, kMouse.y - y) < RACK.r) {
@@ -1226,21 +1277,13 @@ function renderK() {
   }
 }
 function drawOven(c) {
-  const { x: x0, y: y0, w, h } = OVEN, v = SK('forno'), broken = S.fx.forno > 0;
-  c.fillStyle = 'rgba(0,0,0,.3)'; rr(c, x0 + 3, y0 + 6, w, h, 26); c.fill();
-  c.fillStyle = v.body; rr(c, x0, y0, w, h, 26); c.fill();
-  c.save(); rr(c, x0, y0, w, h, 26); c.clip();
-  c.strokeStyle = 'rgba(0,0,0,.2)'; c.lineWidth = 1;
-  for (let y = y0 + 8, row = 0; y < y0 + h; y += 16, row++) {
-    c.beginPath(); c.moveTo(x0, y); c.lineTo(x0 + w, y); c.stroke();
-    for (let x = x0 + (row % 2 ? 12 : 30); x < x0 + w; x += 36) { c.beginPath(); c.moveTo(x, y); c.lineTo(x, y + 16); c.stroke(); }
-  }
-  c.restore();
+  const { x: x0, y: y0, w } = OVEN, v = SK('forno'), broken = S.fx.forno > 0;
   label(c, broken ? 'AVARIADO' : 'FORNO', x0 + w / 2, y0 + 20, 17, broken ? '#ffc6e8' : v.text, 'rgba(0,0,0,.45)');
   for (let i = 0; i < 2; i++) {
     const oy = ovenY(i), ox = x0 + 22, ow = w - 44, p = S.ovens[i];
-    c.fillStyle = '#1b0d08'; rr(c, ox, oy, ow, 70, 26); c.fill();
-    if (!broken) {
+    if (broken) { c.fillStyle = 'rgba(20,10,8,.5)'; rr(c, ox, oy, ow, 70, 26); c.fill(); }
+    else if (LITE) { c.fillStyle = 'rgba(255,120,40,.3)'; rr(c, ox + 10, oy + 36, ow - 20, 34, 16); c.fill(); }
+    else {
       const fl = .55 + Math.sin(G * 9 + i) * .08 + Math.sin(G * 23 + i * 3) * .05;
       const rg = c.createRadialGradient(ox + ow / 2, oy + 62, 4, ox + ow / 2, oy + 62, 70);
       rg.addColorStop(0, `rgba(255,140,40,${fl})`); rg.addColorStop(1, 'rgba(255,90,20,0)');
@@ -1248,7 +1291,6 @@ function drawOven(c) {
     }
     if (p) { c.save(); c.translate(ox + ow / 2, oy + 44); c.scale(1, .5); drawPizza(c, 0, 0, 36, p); c.restore(); }
     const st = p ? pizzaState(p) : null;
-    c.fillStyle = 'rgba(0,0,0,.45)'; rr(c, ox, oy + 76, ow, 8, 4); c.fill();
     if (p) {
       let frac, col;
       if (st === 'raw') { frac = p.bake / COOK; col = broken ? '#777' : '#f4a13a'; }
@@ -1267,16 +1309,14 @@ function drawOven(c) {
 }
 
 /* ---------- desenho: esplanada ---------- */
-function renderD() {
-  const c = dx, lv = SK('relva');
-  c.save();
-  if (S.shake > 0 && !REDUCED) c.translate(rand(-6, 6) * S.shake * 3, rand(-6, 6) * S.shake * 3);
-  c.fillStyle = lv.top; c.fillRect(-10, -10, DW + 20, DH + 20);
+function drawLawnStatic(c) {
+  const lv = SK('relva');
+  c.fillStyle = lv.top; c.fillRect(0, 0, DW, DH);
   for (let r = 0; r < ROWS; r++) for (let col = 0; col < COLS; col++) { c.fillStyle = (r + col) % 2 ? lv.b : lv.a; c.fillRect(GX + col * CW, GY + r * CH, CW, CH); }
   const ex = GX + COLS * CW;
   c.fillStyle = lv.street; c.fillRect(ex, GY, DW - ex, DH - GY);
   c.fillStyle = 'rgba(255,255,255,.12)'; for (let y = GY; y < DH; y += 22) c.fillRect(ex, y, DW - ex, 2);
-  drawLawnDeco(c, GX, GY, COLS * CW, ROWS * CH, lv);
+  drawLawnDeco(c, GX, GY, COLS * CW, ROWS * CH, lv, 'static');
   const fv = SK('parede');
   c.fillStyle = fv.pat === 'brick' ? fv.a : '#7d3421'; c.fillRect(0, GY, GX, DH - GY);
   c.strokeStyle = 'rgba(0,0,0,.22)'; c.lineWidth = 1;
@@ -1284,6 +1324,14 @@ function renderD() {
   drawAwning(c, 0, GY, GX + 6, 10, teamColor(P.team));
   c.fillStyle = '#4a2a18'; rr(c, 6, GY + 2 * CH + 8, 28, CH - 12, 6); c.fill();
   c.fillStyle = '#f4c343'; circ(c, 28, GY + 2 * CH + CH / 2 + 4, 2.5); c.fill();
+}
+function renderD() {
+  const c = dx, lv = SK('relva');
+  c.save();
+  if (S.shake > 0 && !REDUCED) c.translate(rand(-6, 6) * S.shake * 3, rand(-6, 6) * S.shake * 3);
+  c.fillStyle = lv.top; c.fillRect(-10, -10, DW + 20, DH + 20);
+  ensureLayers(); c.drawImage(LAYERS.d, 0, 0, DW, DH);
+  if (!LITE) drawLawnDeco(c, GX, GY, COLS * CW, ROWS * CH, lv, 'anim');
 
   const noZ = S.story && !S.story.zombies.length;
   const lastW = S.story && S.story.goal.type === 'waves' && S.wave >= S.story.goal.n;
@@ -1326,7 +1374,7 @@ function renderD() {
       c.fillStyle = '#3b2216'; circ(c, 0, 0, 16); c.fill(); c.fillStyle = '#1e0f08'; circ(c, 0, 0, 12); c.fill();
       c.strokeStyle = '#5a3a26'; c.lineWidth = 2; c.beginPath(); c.moveTo(-12, 0); c.lineTo(12, 0); c.moveTo(0, -12); c.lineTo(0, 12); c.stroke();
       c.restore();
-      if (Math.random() < .5) S.parts.push({ w: 'd', x: rl.x - 10, y: y - 10, vx: rand(-20, 0), vy: -30, g: -10, life: .6, max: .6, col: '#555', size: rand(3, 5) });
+      if (!LITE && Math.random() < .5) S.parts.push({ w: 'd', x: rl.x - 10, y: y - 10, vx: rand(-20, 0), vy: -30, g: -10, life: .6, max: .6, col: '#555', size: rand(3, 5) });
     }
     const zs = S.zombies.filter(z => z.row === r).sort((a, b) => b.x - a.x);
     for (const z of zs) drawZombie(c, z, z.x, rowGround(r));
@@ -1358,9 +1406,11 @@ function renderD() {
   if (S.banner) {
     const t = S.banner.t, a = t < .3 ? t / .3 : t > 2.1 ? 1 - (t - 2.1) / .5 : 1;
     c.save(); c.globalAlpha = clamp(a, 0, 1);
-    c.fillStyle = 'rgba(20,12,10,.65)'; c.fillRect(0, DH / 2 - 52, DW, 96);
-    label(c, S.banner.txt, DW / 2, DH / 2 - 16, 40 + (1 - ease(t / .4)) * 20, S.sd ? '#ff8a70' : '#f4c343');
-    c.font = '500 16px Rubik, system-ui, sans-serif'; c.fillStyle = '#f7ecdc'; c.textAlign = 'center'; c.fillText(S.banner.sub, DW / 2, DH / 2 + 24);
+    // Centrado na parte visível (o Tetris flutuante pode tapar a direita).
+    const vw = Math.min(DW, TET_COVER), cx = vw / 2;
+    c.fillStyle = 'rgba(20,12,10,.65)'; c.fillRect(0, DH / 2 - 52, vw, 96);
+    label(c, S.banner.txt, cx, DH / 2 - 16, 40 + (1 - ease(t / .4)) * 20, S.sd ? '#ff8a70' : '#f4c343');
+    c.font = '500 16px Rubik, system-ui, sans-serif'; c.fillStyle = '#f7ecdc'; c.textAlign = 'center'; c.fillText(S.banner.sub, cx, DH / 2 + 24, vw - 20);
     c.restore();
   }
   c.restore();
@@ -1511,11 +1561,48 @@ function renderHowKeys() {
   }
 }
 
+/* ---------- telemóvel ---------- */
+// Em ecrãs pequenos ou táteis, tudo tem de caber no ecrã sem scroll: na vertical a cozinha fica por cima
+// da esplanada, na horizontal ficam lado a lado. As larguras dos dois canvas calculam-se a partir do espaço livre.
+let MOBILE = false, fitSig = '';
+function fitMobile() {
+  const m = (COARSE && Math.min(screen.width, screen.height) <= 820) || innerWidth < 760 || innerHeight < 500;
+  const stage = $('#stage');
+  if (m !== MOBILE) {
+    MOBILE = m; fitSig = '';
+    document.body.classList.toggle('m', m);
+    if (!m) { kc.style.width = ''; dc.style.width = ''; stage.classList.remove('m-row'); }
+    TET_MODE = null; if (S && S.sd) layoutTetris();
+  }
+  if (!m) return;
+  const land = innerWidth > innerHeight;
+  stage.classList.toggle('m-row', land);
+  const app = $('.app'), cw = stage.clientWidth;
+  let kw, dw;
+  if (land) {
+    const tools = Math.max($('#kTools').offsetHeight, $('#dTools').offsetHeight);
+    const non = app.offsetHeight - stage.offsetHeight + tools + 12;
+    const h = Math.min(innerHeight - non, (cw - 10) / (KW / KH + DW / DH));
+    kw = h * KW / KH; dw = h * DW / DH;
+  } else {
+    const non = app.offsetHeight - kc.offsetHeight - dc.offsetHeight;
+    kw = dw = Math.min(cw - 8, (innerHeight - non - 2) / (KH / KW + DH / DW));
+  }
+  const sig = Math.floor(kw) + 'x' + Math.floor(dw);
+  if (sig === fitSig) return;
+  fitSig = sig;
+  kc.style.width = Math.max(140, Math.floor(kw)) + 'px';
+  dc.style.width = Math.max(140, Math.floor(dw)) + 'px';
+  if (S && S.sd) layoutTetris();
+}
+addEventListener('resize', () => { fitSig = ''; fitMobile(); });
+addEventListener('orientationchange', () => { fitSig = ''; setTimeout(fitMobile, 150); });
+
 /* ---------- Tetris: posição no ecrã ---------- */
 let TET_MODE = null, TET_COVER = DW;
 function layoutTetris() {
   const side = $('#tetrisSide'), stage = $('#stage'), app = $('.app');
-  const mode = !S.sd ? null : innerWidth < 921 ? 'stack' : innerWidth >= 1690 ? 'dock' : 'float';
+  const mode = !S.sd ? null : MOBILE ? 'float' : innerWidth < 921 ? 'stack' : innerWidth >= 1690 ? 'dock' : 'float';
   if (mode !== TET_MODE) {
     TET_MODE = mode;
     stage.classList.toggle('dock', mode === 'dock'); app.classList.toggle('dock', mode === 'dock');
@@ -1535,13 +1622,13 @@ addEventListener('resize', () => layoutTetris());
 
 /* ---------- interface ---------- */
 function toLocal(canvas, W, H, e) { const r = canvas.getBoundingClientRect(); return { x: (e.clientX - r.left) * W / r.width, y: (e.clientY - r.top) * H / r.height }; }
-kc.addEventListener('pointermove', e => { kMouse = toLocal(kc, KW, KH, e); });
+kc.addEventListener('pointermove', e => { if (e.pointerType === 'mouse') kMouse = toLocal(kc, KW, KH, e); });
 kc.addEventListener('pointerleave', () => { kMouse = null; });
-dc.addEventListener('pointermove', e => { dMouse = toLocal(dc, DW, DH, e); });
+dc.addEventListener('pointermove', e => { if (e.pointerType === 'mouse') dMouse = toLocal(dc, DW, DH, e); });
 dc.addEventListener('pointerleave', () => { dMouse = null; });
 kc.addEventListener('pointerdown', e => {
   if (S.mode !== 'play') return;
-  const { x, y } = toLocal(kc, KW, KH, e); kMouse = { x, y };
+  const { x, y } = toLocal(kc, KW, KH, e); if (e.pointerType === 'mouse') kMouse = { x, y };
   if (y < 196) { for (const cu of S.custs) { const sx = SLOTS[cu.slot]; if (x > sx - 62 && x < sx + 86) { deliver(cu); return; } } return; }
   if (Math.hypot(x - BOARD.x, y - BOARD.y) < BOARD.r) { S.board ? toOven() : addDough(); return; }
   for (let i = 0; i < 2; i++) { const oy = ovenY(i); if (x > OVEN.x + 16 && x < OVEN.x + OVEN.w - 16 && y > oy - 6 && y < oy + 90) { ovenClick(i); return; } }
@@ -1549,10 +1636,36 @@ kc.addEventListener('pointerdown', e => {
 });
 dc.addEventListener('pointerdown', e => {
   if (S.mode !== 'play') return;
-  const { x, y } = toLocal(dc, DW, DH, e); dMouse = { x, y };
+  const { x, y } = toLocal(dc, DW, DH, e); if (e.pointerType === 'mouse') dMouse = { x, y };
   const col = Math.floor((x - GX) / CW), r = Math.floor((y - GY) / CH);
   if (r >= 0 && r < ROWS && (S.tool === 'queimada' ? x >= 0 : col >= 0 && col < COLS)) cellClick(r, clamp(col, 0, COLS - 1));
 });
+kc.addEventListener('contextmenu', e => e.preventDefault());
+tc.addEventListener('contextmenu', e => e.preventDefault());
+// Tetris por gestos (telemóvel): tocar roda, arrastar move, deslizar para baixo larga.
+let tDrag = null;
+tc.addEventListener('pointerdown', e => {
+  if (!tOK()) return;
+  e.preventDefault(); try { tc.setPointerCapture(e.pointerId); } catch (er) { /* sem captura */ }
+  const r = tc.getBoundingClientRect();
+  tDrag = { x: e.clientX, y: e.clientY, t: performance.now(), moved: 0, soft: 0, cell: r.width / TW };
+});
+tc.addEventListener('pointermove', e => {
+  if (!tDrag || !tOK()) return;
+  const n = Math.trunc((e.clientX - tDrag.x) / tDrag.cell);
+  while (tDrag.moved < n) { tMove(1); tDrag.moved++; }
+  while (tDrag.moved > n) { tMove(-1); tDrag.moved--; }
+  const d = Math.trunc((e.clientY - tDrag.y) / (tDrag.cell * 1.5));
+  while (tDrag.soft < d) { tSoft(); tDrag.soft++; }
+});
+tc.addEventListener('pointerup', e => {
+  if (!tDrag) return;
+  const ddx = e.clientX - tDrag.x, ddy = e.clientY - tDrag.y, dt = performance.now() - tDrag.t;
+  if (Math.abs(ddx) < 10 && Math.abs(ddy) < 10 && dt < 350) tRotate();
+  else if (ddy > 40 && dt < 260 && ddy > Math.abs(ddx) * 1.5) tHard();
+  tDrag = null;
+});
+tc.addEventListener('pointercancel', () => { tDrag = null; });
 dc.addEventListener('contextmenu', e => { e.preventDefault(); if (S.tool) { S.tool = null; syncTools(); } });
 document.querySelectorAll('#tPad button').forEach(b => b.addEventListener('pointerdown', e => {
   e.preventDefault();
@@ -1567,7 +1680,7 @@ function toolBtn(parent, { id, name, key, icon, cost, onClick, cls, title }) {
   if (title) b.title = title;
   b.appendChild(iconCanvas(icon));
   b.appendChild(el('span', null, name));
-  if (cost != null) b.appendChild(el('span', 'cost', cost + ' moedas'));
+  if (cost != null) { const cs = el('span', 'cost', String(cost)); cs.appendChild(el('span', 'u', ' moedas')); b.appendChild(cs); }
   if (key) { const k = el('kbd', null, keyLabel(bindOf(key))); KBD[key] = k; b.appendChild(k); }
   b.addEventListener('click', () => { if (S.mode === 'play') onClick(); });
   parent.appendChild(b); return b;
@@ -1654,6 +1767,7 @@ function hud() {
   setText('hearts', '♥'.repeat(h) + '<span class="lost">' + '♥'.repeat(3 - h) + '</span>', true);
   setText('wave', String(S.wave));
   setText('best', String(Math.max(P.best, S.mode === 'menu' ? 0 : Math.floor(S.score))));
+  $('#timeLbl').dataset.short = S.story ? 'Objetivo' : 'Súbita';
   if (S.story) { setText('timeLbl', 'Objetivo'); setText('timeLeft', goalText()); }
   else {
     setText('timeLbl', S.sd ? 'Morte súbita' : 'Morte súbita em');
@@ -1661,7 +1775,7 @@ function hud() {
   }
   $('#timeStat').classList.toggle('sdon', S.sd);
   const now = performance.now();
-  if (now - lastSync > 250) { lastSync = now; syncTools(); renderEffects(); renderTip(); if (S.sd) layoutTetris(); }
+  if (now - lastSync > 250) { lastSync = now; syncTools(); renderEffects(); renderTip(); fitMobile(); if (S.sd) layoutTetris(); }
 }
 function renderEffects() {
   const box = $('#effects'), items = [];
@@ -1746,6 +1860,7 @@ $('#pauseBtn').addEventListener('click', () => S.mode === 'pause' ? resume() : p
 function setMuted(v) {
   muted = v; P.muted = v; saveP();
   for (const id of ['soundBtn', 'optSound']) document.getElementById(id).textContent = 'Som: ' + (v ? 'desligado' : 'ligado');
+  $('#soundBtn').dataset.short = v ? 'Sem som' : 'Som';
   audioOn();
 }
 $('#soundBtn').addEventListener('click', () => setMuted(!muted));
@@ -1753,7 +1868,7 @@ $('#optSound').addEventListener('click', () => setMuted(!muted));
 
 /* ---------- opções ---------- */
 let optReturn = 'menuCard';
-function openOptions(from) { optReturn = from; bindingAct = null; $('#keysNote').textContent = ''; renderOptions(); showCard('optionsCard'); }
+function openOptions(from) { optReturn = from; bindingAct = null; $('#keysNote').textContent = ''; renderOptions(); renderGfx(); showCard('optionsCard'); }
 function renderOptions(flashId) {
   const grid = $('#keysGrid'); grid.textContent = '';
   for (const [group, list] of ACTIONS) {
@@ -1798,6 +1913,16 @@ $('#rankBack').addEventListener('click', () => showCard('menuCard'));
 for (const b of document.querySelectorAll('#rankTabs .tab')) b.addEventListener('click', () => { rankMode = b.dataset.mode; loadRank(); });
 $('#pauseOpt').addEventListener('click', () => openOptions('pauseCard'));
 $('#optBack').addEventListener('click', () => { bindingAct = null; showCard(optReturn); });
+function renderGfx() {
+  const cur = P.gfx || 'auto';
+  for (const b of document.querySelectorAll('#gfxBtns button')) b.setAttribute('aria-pressed', String(b.dataset.gfx === cur));
+  $('#gfxNow').textContent = LITE
+    ? 'Agora: modo leve (30 imagens por segundo, resolução normal, menos efeitos).'
+    : 'Agora: gráficos completos.';
+}
+for (const b of document.querySelectorAll('#gfxBtns button')) b.addEventListener('click', () => {
+  P.gfx = b.dataset.gfx; saveP(); applyGfx(); renderGfx();
+});
 $('#keysReset').addEventListener('click', () => { P.keys = {}; P.keyNames = {}; saveP(); rebuildKeys(); renderOptions(); $('#keysNote').textContent = 'Teclas repostas.'; sfx.pop(); });
 $('#howBtn').addEventListener('click', () => { buildHow(); showCard('howCard'); });
 $('#howBack').addEventListener('click', () => showCard('menuCard'));
@@ -2394,7 +2519,7 @@ addEventListener('keydown', e => {
 document.addEventListener('visibilitychange', () => { if (document.hidden) pause(); });
 
 S = demoState();
-syncShop(); syncStage(); rebuildKeys();
+syncShop(); syncStage(); rebuildKeys(); fitMobile();
 // Com servidor: o perfil guardado lá manda. No primeiro acesso, envia-se o que já estava no browser.
 (async () => {
   if (!sb) return;
@@ -2413,23 +2538,34 @@ syncShop(); syncStage(); rebuildKeys();
       LS.set('pizzaria-sitiada-perfil', JSON.stringify(P));
     } else saveP();
     muted = !!P.muted; nickIn.value = P.name;
-    for (const id of ['soundBtn', 'optSound']) document.getElementById(id).textContent = 'Som: ' + (muted ? 'desligado' : 'ligado');
+    for (const id of ['soundBtn', 'optSound']) document.getElementById(id).textContent = 'Som: ' + (muted ? 'desligado' : 'ligado'); $('#soundBtn').dataset.short = muted ? 'Sem som' : 'Som';
     syncShop(); rebuildKeys(); refreshIcons();
     if (curCard === 'customCard') renderCustom();
   } catch (e) { console.warn('Sem ligação ao servidor; a jogar offline', e); }
 })();
 muted = !!P.muted;
-for (const id of ['soundBtn', 'optSound']) document.getElementById(id).textContent = 'Som: ' + (muted ? 'desligado' : 'ligado');
-let last = performance.now();
+for (const id of ['soundBtn', 'optSound']) document.getElementById(id).textContent = 'Som: ' + (muted ? 'desligado' : 'ligado'); $('#soundBtn').dataset.short = muted ? 'Sem som' : 'Som';
+let last = performance.now(), lastRender = 0, lastPreview = 0;
 function frame(now) {
-  const dt = Math.min(.05, (now - last) / 1000); last = now; G += dt;
+  const dt = clamp((now - last) / 1000, 0, .05); last = now; G += dt;
   if (S.mode === 'play') update(dt); else if (S.mode === 'menu') idle(dt);
   if (S.mp) netTick();
-  syncStage();
-  renderK(); renderD(); if (S.sd) renderT(); hud();
-  if (curCard === 'menuCard' && !overlay.hidden) drawPreview(mpx);
-  if (curCard === 'customCard' && !overlay.hidden) drawPreview(cpx);
+  // A lógica corre sempre; o desenho é que pode saltar imagens (30 por segundo no modo leve, menos atrás de menus).
+  const behind = !overlay.hidden;
+  const gap = behind ? (LITE ? 200 : 33) : (LITE ? 32 : 0);
+  if (now - lastRender >= gap - 1) {
+    lastRender = now;
+    syncStage();
+    renderK(); renderD(); if (S.sd) renderT(); hud();
+  }
+  if (behind && now - lastPreview >= (LITE ? 66 : 16)) {
+    lastPreview = now;
+    if (curCard === 'menuCard') drawPreview(mpx);
+    if (curCard === 'customCard') drawPreview(cpx);
+  }
   requestAnimationFrame(frame);
 }
+// ?jogar no endereço começa logo uma partida de sobrevivência (link direto para jogar).
+if (new URLSearchParams(location.search).has('jogar')) start();
 requestAnimationFrame(frame);
 })();

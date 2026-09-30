@@ -202,6 +202,59 @@ canvas.scene{display:block;width:100%;height:auto;border-radius:10px;touch-actio
 @keyframes blink{50%{opacity:.45}}
 .howkeys{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:4px 20px;font-size:.84rem;color:var(--muted);line-height:1.8}
 .howkeys kbd,.keys kbd{font-family:var(--body);background:var(--panel-2);border:1px solid var(--line);border-radius:4px;padding:0 5px;color:var(--fg)}
+/* Opção segmentada (desempenho) */
+.seg{display:inline-flex;border:1px solid var(--line);border-radius:10px;overflow:hidden;align-self:flex-start}
+.seg button{font:inherit;font-size:.85rem;font-weight:500;color:var(--muted);background:var(--panel-2);border:0;border-right:1px solid var(--line);padding:8px 14px;cursor:pointer}
+.seg button:last-child{border-right:0}
+.seg button[aria-pressed="true"]{background:var(--cheese);color:#2a1a0a}
+.seg button:focus-visible{outline:2px solid var(--cheese);outline-offset:-2px}
+
+/* Modo leve: sem desfoque atrás dos menus (muito caro em telemóveis fracos) */
+body.lite .overlay{backdrop-filter:none;background:rgba(16,10,8,.92)}
+body.lite .card{box-shadow:none}
+body.lite .bump{animation:none}
+
+/* Telemóvel: tudo no ecrã, sem scroll; botões só com ícone */
+button,canvas,.tool{touch-action:manipulation}
+#tc{touch-action:none}
+body.m{overflow:hidden;overscroll-behavior:none;-webkit-user-select:none;user-select:none}
+body.m .app{padding-inline:4px;padding-block:3px;gap:3px;max-width:none}
+body.m .hud{padding:3px 8px;gap:4px 8px;border-radius:9px;flex-wrap:nowrap}
+body.m .brand{display:none}
+body.m .stats{margin-left:0;gap:8px;flex-wrap:nowrap;flex:1;justify-content:space-around;min-width:0}
+body.m .stat{min-width:0}
+body.m .stat span{font-size:.5rem;letter-spacing:.04em}
+body.m .stat b{font-size:.95rem}
+body.m #bestStat{display:none}
+body.m .hud [data-short]{font-size:0}
+body.m .hud .stat span[data-short]::after{content:attr(data-short);font-size:.5rem}
+body.m .hud .btn-sm[data-short]{font-size:0}
+body.m .hud .btn-sm[data-short]::after{content:attr(data-short);font-size:.68rem}
+body.m .tool .cost .u{display:none}
+body.m .hud-btns .btn-sm{padding:4px 7px;font-size:.68rem}
+body.m .hud-btns kbd{display:none}
+body.m .stage{display:flex;flex-direction:column;gap:3px;align-items:stretch}
+body.m .stage.m-row{flex-direction:row;align-items:flex-start;justify-content:center}
+body.m .side{padding:2px;gap:2px;border-radius:9px;min-width:0}
+body.m .stage.m-row .side{flex:0 0 auto}
+body.m .side-head{display:none}
+body.m canvas.scene{margin-inline:auto;border-radius:6px}
+body.m .tools{flex-wrap:nowrap;overflow-x:auto;gap:2px;scrollbar-width:none}
+body.m .tools::-webkit-scrollbar{display:none}
+body.m .tool{flex:1 0 38px;padding:3px 1px;gap:0;border-radius:7px}
+body.m .tool>span:not(.cost):not(.badge),body.m .tool kbd{display:none}
+body.m .tool canvas{width:28px;height:28px}
+body.m .tool .cost{font-size:.55rem}
+body.m .sabbar{padding:2px}
+body.m .sabbar .tool{flex:0 0 44px}
+body.m .rivals,body.m .effects{flex-wrap:nowrap;overflow-x:auto;gap:3px;scrollbar-width:none}
+body.m .rival{padding:2px 8px;font-size:.7rem;flex:none;gap:6px}
+body.m .rival b{font-size:.9rem}
+body.m .effect{font-size:.68rem;padding:3px 8px;flex:none}
+body.m .tip{font-size:.74rem;padding:4px 8px;line-height:1.3}
+body.m .overlay{padding:8px}
+body.m .card{padding:18px 14px;gap:12px}
+
 /* Modo história */
 .levels{list-style:none;margin:0;padding:0;display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:10px}
 .levels li{display:flex}

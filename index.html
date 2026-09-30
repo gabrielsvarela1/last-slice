@@ -3,6 +3,8 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
   <title>Pizzaria Sitiada</title>
   <meta name="description" content="Serve pizzas e trava zombies ao mesmo tempo. Joga sozinho ou contra amigos online.">
   <meta name="theme-color" content="#1a1210">
@@ -18,14 +20,14 @@
     <div class="stats">
       <div class="stat coins"><span>Moedas</span><b id="coins">100</b></div>
       <div class="stat"><span>Pontos</span><b id="score">0</b></div>
-      <div class="stat hearts"><span>Reputação</span><b id="hearts">♥♥♥</b></div>
+      <div class="stat hearts"><span data-short="">Reputação</span><b id="hearts">♥♥♥</b></div>
       <div class="stat"><span>Onda</span><b id="wave">0</b></div>
-      <div class="stat" id="timeStat"><span id="timeLbl">Morte súbita em</span><b id="timeLeft">0:15</b></div>
+      <div class="stat" id="timeStat"><span id="timeLbl" data-short="Súbita">Morte súbita em</span><b id="timeLeft">0:15</b></div>
       <div class="stat" id="bestStat"><span>Recorde</span><b id="best">0</b></div>
     </div>
     <div class="hud-btns">
       <button class="btn-sm" id="pauseBtn" type="button">Pausa <kbd>P</kbd></button>
-      <button class="btn-sm" id="soundBtn" type="button">Som: ligado</button>
+      <button class="btn-sm" id="soundBtn" type="button" data-short="Som">Som: ligado</button>
     </div>
   </header>
   <div class="rivals" id="rivals" hidden></div>
@@ -172,6 +174,15 @@
     <div class="card wide" id="optionsCard" hidden>
       <h1 class="h-sm">Opções</h1>
       <div class="how-sec"><h2>Som</h2><div class="row"><button class="btn-sm" id="optSound" type="button">Som: ligado</button></div></div>
+      <div class="how-sec"><h2>Desempenho</h2>
+        <div class="seg" id="gfxBtns" role="group" aria-label="Qualidade dos gráficos">
+          <button type="button" data-gfx="auto">Automático</button>
+          <button type="button" data-gfx="normal">Completo</button>
+          <button type="button" data-gfx="leve">Leve</button>
+        </div>
+        <p class="note" id="gfxNow"></p>
+        <p class="note">O modo leve é para telemóveis e computadores mais fracos. Em automático, liga-se sozinho em ecrãs táteis.</p>
+      </div>
       <div class="how-sec"><h2>Atalhos de teclado</h2>
         <p class="note">Clica numa tecla e carrega na nova. Se a tecla já estiver a ser usada, as duas ações trocam. <kbd>Esc</kbd> cancela a mudança. Durante o jogo, <kbd>Esc</kbd> larga a seleção ou pausa.</p>
         <div class="keys-grid" id="keysGrid"></div>
