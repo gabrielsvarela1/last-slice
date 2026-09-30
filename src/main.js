@@ -769,7 +769,7 @@ function freshState(seed = (Math.random() * 2 ** 31) | 0, mp = false, story = nu
     towers: [], zombies: [], shots: [], rollers: [], parts: [], floats: [], flyers: [],
     cutters: Array.from({ length: ROWS }, () => ({ st: 'ready', x: GX - 22 })),
     tool: null, served: 0, kills: 0, shake: 0, banner: null,
-    burnt: 0, fx: {}, fxTop: null, shield: false, sabCd: 0, sd: false, sdT: 0, tet: null, earned: null,
+    burnt: 0, sel: null, fx: {}, fxTop: null, shield: false, sabCd: 0, sd: false, sdT: 0, tet: null, earned: null,
   };
 }
 function demoState() {
@@ -831,6 +831,11 @@ function addTopping(t) {
   burst('k', BOARD.x + rand(-30, 30), BOARD.y + rand(-30, 30), TOPS[t].color, 7, 80, 80, 3); sfx.pop();
 }
 function trashBoard() {
+  if (S.sel != null && S.rack[S.sel]) {
+    const i = S.sel; S.rack[i] = null; S.sel = null;
+    toast('Pizza pronta para o lixo', RACK.x - 20, RACK.y(i) - 40, '#ffd2c4'); burst('k', RACK.x, RACK.y(i), '#8a6a4a', 8, 80); sfx.err();
+    return;
+  }
   if (!S.board) return;
   S.board = null; toast('Pizza para o lixo', BOARD.x, 236, '#ffd2c4'); burst('k', BOARD.x, BOARD.y, '#8a6a4a', 10, 100); sfx.err();
 }
@@ -865,8 +870,15 @@ function takeOut() {
   if (best < 0) { toast(S.ovens.some(Boolean) ? 'Ainda nenhuma está pronta' : 'O forno está vazio', 331, 226, '#ffd2c4'); sfx.err(); return; }
   ovenClick(best);
 }
-// Entregar pelo teclado: ao cliente com menos paciência que tenha a pizza certa na prateleira.
+// Entregar pelo teclado: a pizza selecionada (se houver) ao cliente que a pediu;
+// senão, ao cliente com menos paciência que tenha a pizza certa na prateleira.
 function deliverAuto() {
+  if (S.sel != null && S.rack[S.sel]) {
+    const k = keyOf(S.rack[S.sel].tops);
+    const cu = S.custs.filter(c => c.st !== 'leave' && c.key === k).sort((a, b) => a.pat / a.max - b.pat / b.max)[0];
+    if (cu) { deliverFrom(S.sel, cu); return; }
+    toast('Nenhum cliente pediu esta pizza. Lixo: ' + keyLabel(bindOf('lixo')), RACK.x - 80, 226, '#ffd2c4'); sfx.err(); return;
+  }
   let best = null;
   for (const cu of S.custs) {
     if (cu.st === 'leave' || !S.rack.some(p => p && keyOf(p.tops) === cu.key)) continue;
@@ -875,16 +887,20 @@ function deliverAuto() {
   if (!best) { toast(S.rack.some(Boolean) ? 'Nenhuma pizza pronta bate com os pedidos' : 'Ainda não há pizzas prontas', RACK.x - 60, 226, '#ffd2c4'); sfx.err(); return; }
   deliver(best);
 }
-function rackClick(i) {
-  if (!S.rack[i]) return;
-  S.rack[i] = null; toast('Deitada fora', RACK.x - 20, RACK.y(i) - 40, '#ffd2c4'); burst('k', RACK.x, RACK.y(i), '#8a6a4a', 8, 80); sfx.err();
-}
+// Clicar num cliente sem pizza selecionada: entrega-lhe a pizza certa, se estiver na prateleira.
 function deliver(cu) {
   if (cu.st === 'leave') return;
-  const sx = SLOTS[cu.slot];
   const i = S.rack.findIndex(p => p && keyOf(p.tops) === cu.key);
-  if (i < 0) { toast(S.rack.some(Boolean) ? 'Nenhuma pizza pronta é esta' : 'Ainda não há pizzas prontas', sx + 20, 120, '#ffd2c4'); sfx.err(); return; }
-  const p = S.rack[i]; S.rack[i] = null;
+  if (i < 0) { toast(S.rack.some(Boolean) ? 'Nenhuma pizza pronta é esta' : 'Ainda não há pizzas prontas', SLOTS[cu.slot] + 20, 120, '#ffd2c4'); sfx.err(); return; }
+  deliverFrom(i, cu);
+}
+// Entrega a pizza da prateleira i ao cliente cu (clicar-clicar, arrastar ou teclado).
+function deliverFrom(i, cu) {
+  const p = S.rack[i];
+  if (!p || cu.st === 'leave') return;
+  const sx = SLOTS[cu.slot];
+  if (keyOf(p.tops) !== cu.key) { cu.qT = .4; toast('Não foi esta pizza que este cliente pediu', sx + 20, 120, '#ffd2c4'); sfx.err(); return; }
+  S.rack[i] = null; if (S.sel === i) S.sel = null;
   const ct = CTYPES[cu.type], ratio = cu.pat / cu.max, extras = cu.order.length - 2, tip = Math.round(ratio * 10);
   const pay = Math.round((18 + 7 * extras + tip) * ct.pay) + (cu.type === 'avo' ? 10 : 0);
   S.coins += pay; S.score += (100 + extras * 30 + tip * 10) * ct.pay * scoreMul(); S.served++;
@@ -1239,7 +1255,14 @@ function renderK() {
     c.fillStyle = 'rgba(0,0,0,.4)'; rr(c, sx - 60, 168, 142, 10, 5); c.fill();
     c.fillStyle = ratio > .5 ? '#6db552' : ratio > .25 ? '#f4c343' : '#e24a2c';
     rr(c, sx - 60, 168, Math.max(10, 142 * ratio), 10, 5); c.fill();
-    if (kMouse && kMouse.y < 196 && kMouse.x > sx - 62 && kMouse.x < sx + 86) { c.strokeStyle = 'rgba(255,255,255,.7)'; c.lineWidth = 2; rr(c, sx - 4, 6, 90, 80, 15); c.stroke(); }
+    // Com uma pizza na mão (selecionada ou a arrastar): verde nos clientes que a pediram; vermelho se a largares no errado.
+    const held = kDrag && kDrag.active ? S.rack[kDrag.i] : S.sel != null ? S.rack[S.sel] : null;
+    const over = kDrag && kDrag.active && custAt(kDrag.x, kDrag.y) === cu;
+    if (held && (over || keyOf(held.tops) === cu.key)) {
+      const ok = keyOf(held.tops) === cu.key;
+      c.strokeStyle = ok ? `rgba(109,181,82,${over ? 1 : .6 + .4 * Math.sin(G * 6)})` : '#e24a2c';
+      c.lineWidth = over ? 5 : 4; rr(c, sx - 5, 5, 92, 82, 16); c.stroke();
+    } else if (kMouse && kMouse.y < 196 && kMouse.x > sx - 62 && kMouse.x < sx + 86) { c.strokeStyle = 'rgba(255,255,255,.7)'; c.lineWidth = 2; rr(c, sx - 4, 6, 90, 80, 15); c.stroke(); }
   }
   if (S.board) drawPizza(c, BOARD.x, BOARD.y, 74, S.board);
   else {
@@ -1256,13 +1279,14 @@ function renderK() {
   for (let i = 0; i < 3; i++) {
     const y = RACK.y(i);
     if (S.rack[i]) {
-      drawPizza(c, RACK.x, y, 26, S.rack[i]);
-      if (kMouse && Math.hypot(kMouse.x - RACK.x, kMouse.y - y) < RACK.r) {
-        c.fillStyle = '#e24a2c'; circ(c, RACK.x + 24, y - 24, 10); c.fill();
-        c.strokeStyle = '#fff'; c.lineWidth = 2.5; c.beginPath(); c.moveTo(RACK.x + 20, y - 28); c.lineTo(RACK.x + 28, y - 20); c.moveTo(RACK.x + 28, y - 28); c.lineTo(RACK.x + 20, y - 20); c.stroke();
-      }
+      const dragging = kDrag && kDrag.active && kDrag.i === i;
+      if (dragging) { c.save(); c.globalAlpha = .3; drawPizza(c, RACK.x, y, 26, S.rack[i]); c.restore(); }
+      else drawPizza(c, RACK.x, y, 26, S.rack[i]);
+      if (S.sel === i) { c.strokeStyle = `rgba(244,195,67,${.75 + .25 * Math.sin(G * 6)})`; c.lineWidth = 4; circ(c, RACK.x, y, RACK.r + 3); c.stroke(); }
+      else if (kMouse && Math.hypot(kMouse.x - RACK.x, kMouse.y - y) < RACK.r) { c.strokeStyle = 'rgba(255,255,255,.6)'; c.lineWidth = 2; circ(c, RACK.x, y, RACK.r + 3); c.stroke(); }
     }
   }
+  if (kDrag && kDrag.active && S.rack[kDrag.i]) drawPizza(c, kDrag.x, kDrag.y, 30, S.rack[kDrag.i]);
   for (const f of S.flyers) {
     const t = ease(f.t / f.d), x = f.x0 + (f.x1 - f.x0) * t, y = f.y0 + (f.y1 - f.y0) * t - Math.sin(t * Math.PI) * 40;
     c.save(); if (f.fade) c.globalAlpha = 1 - t * .6; drawPizza(c, x, y, f.r0 + (f.r1 - f.r0) * t, f.p); c.restore();
@@ -1626,13 +1650,38 @@ kc.addEventListener('pointermove', e => { if (e.pointerType === 'mouse') kMouse 
 kc.addEventListener('pointerleave', () => { kMouse = null; });
 dc.addEventListener('pointermove', e => { if (e.pointerType === 'mouse') dMouse = toLocal(dc, DW, DH, e); });
 dc.addEventListener('pointerleave', () => { dMouse = null; });
+// Entregar: clicar na pizza pronta (fica contornada) e depois no cliente, ou arrastá-la até ele.
+// Um toque sem mexer é um clique; a partir de 10 unidades de movimento passa a ser arrastar.
+let kDrag = null;
+const custAt = (x, y) => y < 196 ? S.custs.find(cu => cu.st !== 'leave' && x > SLOTS[cu.slot] - 62 && x < SLOTS[cu.slot] + 86) || null : null;
+kc.addEventListener('pointermove', e => {
+  if (!kDrag) return;
+  const p = toLocal(kc, KW, KH, e); kDrag.x = p.x; kDrag.y = p.y;
+  if (!kDrag.active && Math.hypot(p.x - kDrag.sx, p.y - kDrag.sy) > 10) { kDrag.active = true; S.sel = kDrag.i; }
+});
+kc.addEventListener('pointerup', () => {
+  const d = kDrag; kDrag = null;
+  if (!d || S.mode !== 'play' || !S.rack[d.i]) return;
+  if (!d.active) { S.sel = S.sel === d.i ? null : d.i; sfx.tick(); return; }
+  const cu = custAt(d.x, d.y);
+  if (cu) deliverFrom(d.i, cu);
+});
+kc.addEventListener('pointercancel', () => { kDrag = null; });
 kc.addEventListener('pointerdown', e => {
   if (S.mode !== 'play') return;
   const { x, y } = toLocal(kc, KW, KH, e); if (e.pointerType === 'mouse') kMouse = { x, y };
-  if (y < 196) { for (const cu of S.custs) { const sx = SLOTS[cu.slot]; if (x > sx - 62 && x < sx + 86) { deliver(cu); return; } } return; }
+  if (y < 196) {
+    const cu = custAt(x, y);
+    if (cu) { if (S.sel != null && S.rack[S.sel]) deliverFrom(S.sel, cu); else deliver(cu); }
+    return;
+  }
   if (Math.hypot(x - BOARD.x, y - BOARD.y) < BOARD.r) { S.board ? toOven() : addDough(); return; }
   for (let i = 0; i < 2; i++) { const oy = ovenY(i); if (x > OVEN.x + 16 && x < OVEN.x + OVEN.w - 16 && y > oy - 6 && y < oy + 90) { ovenClick(i); return; } }
-  for (let i = 0; i < 3; i++) if (Math.hypot(x - RACK.x, y - RACK.y(i)) < RACK.r + 4) { rackClick(i); return; }
+  for (let i = 0; i < 3; i++) if (S.rack[i] && Math.hypot(x - RACK.x, y - RACK.y(i)) < RACK.r + 4) {
+    kDrag = { i, x, y, sx: x, sy: y, active: false };
+    try { kc.setPointerCapture(e.pointerId); } catch (er) { /* sem captura */ }
+    return;
+  }
 });
 dc.addEventListener('pointerdown', e => {
   if (S.mode !== 'play') return;
@@ -2097,7 +2146,9 @@ function storyTip() {
   }
   const waiting = S.custs.filter(c => c.st === 'wait').sort((a, b) => a.pat / a.max - b.pat / b.max);
   const cu = waiting[0];
-  if (cu && S.rack.some(p => p && keyOf(p.tops) === cu.key)) return `Pizza pronta na prateleira! Clica no cliente ou carrega em ${K('entregar')} para entregar.`;
+  if (cu && S.rack.some(p => p && keyOf(p.tops) === cu.key)) return S.sel != null && S.rack[S.sel]
+    ? 'Agora clica no cliente assinalado a verde para lhe entregares a pizza.'
+    : `Pizza pronta! Clica nela e depois no cliente, ou arrasta-a até ele. A tecla ${K('entregar')} entrega sozinha.`;
   if (S.ovens.some(p => p && pizzaState(p) === 'cooked')) return `A barra ficou verde: a pizza está pronta. Clica no forno ou carrega em ${K('tirar')} para a tirar antes que queime.`;
   if (!cu) return S.served ? null : 'Espera pelo primeiro cliente…';
   if (!S.board) return S.ovens.some(Boolean) ? `Enquanto a pizza coze, podes começar outra: ${K('massa')} para pôr massa.` : `Um cliente quer uma pizza. Clica na bancada ou carrega em ${K('massa')} para pôr massa.`;
@@ -2552,7 +2603,7 @@ function frame(now) {
   if (S.mp) netTick();
   // A lógica corre sempre; o desenho é que pode saltar imagens (30 por segundo no modo leve, menos atrás de menus).
   const behind = !overlay.hidden;
-  const gap = behind ? (LITE ? 200 : 33) : (LITE ? 32 : 0);
+  const gap = behind ? (LITE ? 200 : 33) : (LITE && !(kDrag && kDrag.active) ? 32 : 0);
   if (now - lastRender >= gap - 1) {
     lastRender = now;
     syncStage();
