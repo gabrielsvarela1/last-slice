@@ -44,6 +44,7 @@ function xMark(c, x, y, s = 10) {
 }
 const cleanName = (s, n = 16) => (typeof s === 'string' ? s : '').replace(/[\u0000-\u001f\u007f-\u009f­​-‏‪-‮⁠-⁯﻿]/g, '').trim().slice(0, n);
 const el = (tag, cls, txt) => { const e = document.createElement(tag); if (cls) e.className = cls; if (txt != null) e.textContent = txt; return e; };
+// Storage keys keep the old "pizzaria-sitiada-" prefix so players keep their progress after the rename to Last Slice.
 const LS = {
   get(k) { try { return localStorage.getItem(k); } catch (e) { return null; } },
   set(k, v) { try { localStorage.setItem(k, v); } catch (e) {} },
